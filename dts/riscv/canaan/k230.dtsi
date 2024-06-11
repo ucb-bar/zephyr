@@ -1,0 +1,111 @@
+/*
+ * Copyright (c) 2024 Junhui Liu <liujh2818@outlook.com>
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <freq.h>
+
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	compatible = "canaan,kendryte-k230";
+	model = "canaan,k230";
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			compatible = "thead,c908", "riscv";
+			device_type = "cpu";
+			mmu-type = "riscv,sv39";
+			reg = <0>;
+			riscv,isa = "rv64imafdc_zicsr_zifencei";
+			status = "okay";
+
+			cpu0_intc: interrupt-controller {
+				compatible = "riscv,cpu-intc";
+				#address-cells = <0>;
+				#interrupt-cells = <1>;
+				interrupt-controller;
+			};
+		};
+	};
+
+	soc {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		compatible = "simple-bus";
+		interrupt-parent = <&plic>;
+		ranges;
+
+		plic: interrupt-controller@f00000000 {
+			compatible = "sifive,plic-1.0.0";
+			#address-cells = <0>;
+			#interrupt-cells = <2>;
+			interrupt-controller;
+			interrupts-extended = <&cpu0_intc 11>, <&cpu0_intc 9>;
+			reg = <0xf 0x00000000 0x0 0x04000000>;
+			riscv,max-priority = <7>;
+			riscv,ndev = <208>;
+		};
+
+		clint: clint@f04000000 {
+			compatible = "thead,machine-timer";
+			interrupts-extended = <&cpu0_intc 3 &cpu0_intc 7>;
+			reg = <0xf 0x04000000 0x0 0x00010000>;
+		};
+
+		uart0: serial@91400000 {
+			compatible = "ns16550", "snps,dw-apb-uart";
+			interrupts = <16 1>;
+			interrupt-parent = <&plic>;
+			clock-frequency = <50000000>;
+			reg = <0x0 0x91400000 0x0 0x1000 >;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart1: serial@91401000 {
+			compatible = "ns16550", "snps,dw-apb-uart";
+			interrupts = <17 1>;
+			interrupt-parent = <&plic>;
+			clock-frequency = <50000000>;
+			reg = <0x0 0x91401000 0x0 0x1000 >;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart2: serial@91402000 {
+			compatible = "ns16550", "snps,dw-apb-uart";
+			interrupts = <18 1>;
+			interrupt-parent = <&plic>;
+			clock-frequency = <50000000>;
+			reg = <0x0 0x91402000 0x0 0x1000 >;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart3: serial@91403000 {
+			compatible = "ns16550", "snps,dw-apb-uart";
+			interrupts = <19 1>;
+			interrupt-parent = <&plic>;
+			clock-frequency = <50000000>;
+			reg = <0x0 0x91403000 0x0 0x1000 >;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		uart4: serial@91404000 {
+			compatible = "ns16550", "snps,dw-apb-uart";
+			interrupts = <20 1>;
+			interrupt-parent = <&plic>;
+			clock-frequency = <50000000>;
+			reg = <0x0 0x91404000 0x0 0x1000 >;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+	};
+};
