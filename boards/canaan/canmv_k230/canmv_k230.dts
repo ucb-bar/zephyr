@@ -12,7 +12,7 @@
 	model = "Canaan CanMV-K230";
 	compatible = "cannan,canmv-k230";
 
-	ddr: memory@0 {
+	ddr: memory@1f000000 {
 		device_type = "memory";
 		reg = <0x0 0x1f000000 0x0 0xFFF000>;
 	};
