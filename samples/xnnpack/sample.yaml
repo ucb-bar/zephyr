@@ -1,0 +1,8 @@
+sample:
+  description: XNNPack DNN library example
+  name: xnnpack 
+common:
+  tags: tinyml 
+  integration_platforms:
+    - native_sim
+  harness: console
