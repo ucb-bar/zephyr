@@ -188,6 +188,7 @@ SECTIONS
 
     __text_region_end = .;
 
+
 	__rodata_region_start = .;
 #include <zephyr/linker/common-rom.ld>
 /* Located in generated directory. This file is populated by calling
@@ -292,6 +293,7 @@ SECTIONS
 
 #include <zephyr/linker/common-noinit.ld>
 
+
     SECTION_DATA_PROLOGUE(_DATA_SECTION_NAME,,)
 	{
 		 . = ALIGN(4);
@@ -337,6 +339,10 @@ SECTIONS
 
 	__data_region_load_start = LOADADDR(_DATA_SECTION_NAME);
 
+	
+
+
+
 #include <zephyr/linker/common-ram.ld>
 #include <zephyr/linker/kobject-data.ld>
 #include <zephyr/linker/cplusplus-ram.ld>
@@ -347,6 +353,9 @@ SECTIONS
 #include <snippets-data-sections.ld>
 
     __data_region_end = .;
+    .htif ALIGN(0x40) : {
+        KEEP(*(.htif))
+    }
 
 	__kernel_ram_end = .;
 	__kernel_ram_size = __kernel_ram_end - __kernel_ram_start;
@@ -470,5 +479,8 @@ SECTION_PROLOGUE(.last_section,,)
 __rom_region_end = LOADADDR(.last_section) + SIZEOF(.last_section);
 __rom_region_size = __rom_region_end - __rom_region_start;
 #endif
+
+PROVIDE(__heap_start = ORIGIN(RAM) + 0x1000);
+PROVIDE(__heap_end = ORIGIN(RAM) + LENGTH(RAM) - 0x1000);
 
 }
