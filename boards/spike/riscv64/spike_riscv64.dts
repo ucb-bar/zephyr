@@ -1,0 +1,25 @@
+/* Copyright (c) 2019 BayLibre SAS */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/dts-v1/;
+
+#include <spike/virt-riscv64.dtsi>
+
+/ {
+	chosen {
+		zephyr,console= &htif;
+		zephyr,shell-uart = &htif;
+		zephyr,sram = &ram0;
+	};
+};
+
+// Disable default ns16550 UART
+&uart0 {
+	status = "disabled";
+};
+
+&htif {
+	status = "okay";
+};
+
+

@@ -14,7 +14,7 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pinctrl.h>
-#include <zephyr/drivers/bluetooth/hci_driver.h>
+#include <zephyr/drivers/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/hci_raw.h>
 
@@ -337,6 +337,25 @@ int bt_apollo_controller_init(spi_transmit_fun transmit)
 
 	irq_enable(DT_IRQN(SPI_DEV_NODE));
 #endif /* CONFIG_SOC_SERIES_APOLLO4X */
+
+	return ret;
+}
+
+int bt_apollo_controller_deinit(void)
+{
+	int ret = -ENOTSUP;
+
+#if (CONFIG_SOC_SERIES_APOLLO3X)
+	irq_disable(DT_IRQN(SPI_DEV_NODE));
+
+	ret = am_apollo3_bt_controller_deinit();
+	if (ret == AM_HAL_STATUS_SUCCESS) {
+		LOG_INF("BT controller deinitialized");
+	} else {
+		ret = -EPERM;
+		LOG_ERR("BT controller deinitialization fails");
+	}
+#endif /* CONFIG_SOC_SERIES_APOLLO3X */
 
 	return ret;
 }

@@ -131,13 +131,13 @@ Devices belonging to this device can be declared referring it in the
         &gpio0 {
                 compatible = "zephyr,gpio-emul";
                 gpio-controller;
-                power-domain = <&gpio_domain>;
+                power-domains = <&gpio_domain>;
         };
 
         &gpio1 {
                 compatible = "zephyr,gpio-emul";
                 gpio-controller;
-                power-domain = <&gpio_domain>;
+                power-domains = <&gpio_domain>;
         };
 
 All devices under a domain will be notified when the domain changes
@@ -184,5 +184,5 @@ Examples
 
 Some helpful examples showing power domain features:
 
-* :zephyr_file:`samples/subsys/pm/device_power_domains/`
-* :zephyr_file:`samples/subsys/pm/power_domain/`
+* :zephyr_file:`tests/subsys/pm/device_power_domains/`
+* :zephyr_file:`tests/subsys/pm/power_domain/`

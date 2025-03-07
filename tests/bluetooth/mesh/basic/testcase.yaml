@@ -37,6 +37,18 @@ tests:
     platform_allow:
       - qemu_x86
       - nrf52840dk/nrf52840
+      - nrf5340dk/nrf5340/cpuapp/ns
+    integration_platforms:
+      - qemu_x86
+    tags:
+      - bluetooth
+      - mesh
+  bluetooth.mesh.gatt.psa:
+    build_only: true
+    extra_args: CONF_FILE=gatt.conf
+    platform_allow:
+      - qemu_x86
+      - nrf5340dk/nrf5340/cpuapp/ns
     integration_platforms:
       - qemu_x86
     tags:

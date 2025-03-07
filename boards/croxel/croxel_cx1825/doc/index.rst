@@ -1,7 +1,4 @@
-.. _croxel_cx1825_nrf52840:
-
-CX1825 nRF52840
-###############
+.. zephyr:board:: croxel_cx1825
 
 Overview
 ********
@@ -24,12 +21,6 @@ Semiconductor nRF52840 ARM Cortex-M4F CPU and the following devices:
 * :abbr:`USB (Universal Serial Bus)`
 * :abbr:`WDT (Watchdog Timer)`
 
-.. figure:: img/cx1825_nrf52840.jpg
-     :align: center
-     :alt: CX1825
-
-     Croxel's CX1825 Bluetooth Prototyping board (Credit: Croxel)
-
 Hardware
 ********
 
@@ -44,7 +35,7 @@ Hardware
 - Temperature and Humidity Sensor (HTS221)
 - Barometric Pressure sensor (LPS22H)
 - Hall Effect Switch (MLX90248)
-- RGB LED with Charge-Pump driver (LPS5521)
+- RGB LED with Charge-Pump driver (LP5521)
 - Digital Microphone
 - Beeper
 - QWIIC connector supporting expansion for I2C devices

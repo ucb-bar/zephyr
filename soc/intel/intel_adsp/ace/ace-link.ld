@@ -285,6 +285,10 @@ SECTIONS {
     *libarch__xtensa__core.a:userspace.S.obj(.literal.xtensa_do_syscall)
     *libarch__xtensa__core.a:userspace.S.obj(.text.xtensa_do_syscall)
 
+#ifdef CONFIG_XTENSA_SYSCALL_USE_HELPER
+    *libarch__xtensa__core.a:syscall_helper.c.obj(.text.xtensa_syscall_helper*)
+#endif /* CONFIG_XTENSA_SYSCALL_USE_HELPER */
+
   } > xtensa_vector_code
 #endif /* CONFIG_XTENSA_MMU */
 
@@ -378,6 +382,11 @@ SECTIONS {
 
   __common_rom_region_start = SEGSTART_CACHED;
 #include <zephyr/linker/common-rom.ld>
+/* Located in generated directory. This file is populated by calling
+ * zephyr_linker_sources(ROM_SECTIONS ...). Useful for grouping iterable RO structs.
+ */
+#include <snippets-rom-sections.ld>
+   __rodata_region_end = .;
   __common_rom_region_end = .;
     __rodata_region_end = .;
 

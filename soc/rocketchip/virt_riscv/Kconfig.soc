@@ -1,0 +1,18 @@
+# Copyright (c) 2024 Antmicro <www.antmicro.com>
+# Copyright (c) 2025 Dima Nikiforov <vnikiforov@berkeley.edu>
+# SPDX-License-Identifier: Apache-2.0
+
+config SOC_FAMILY_ROCKETCHIP_VIRT_RISCV
+	bool
+
+config SOC_FAMILY
+	default "rocketchip_virt_riscv" if SOC_FAMILY_ROCKETCHIP_VIRT_RISCV
+
+config STARTUP_TACIT
+    bool "Enable startup tracing from bootup"
+    default n
+    help
+      Enable profiling and tracing at the earliest stage of bootup.
+
+
+rsource "*/Kconfig.soc"

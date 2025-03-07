@@ -1,7 +1,4 @@
-.. _mimxrt1060_evk:
-
-NXP MIMXRT1060-EVK
-##################
+.. zephyr:board:: mimxrt1060_evk
 
 Overview
 ********
@@ -15,9 +12,6 @@ ideal for real-time applications such as High-Speed GPIO, CAN FD, and
 synchronous parallel NAND/NOR/PSRAM controller. The i.MX RT1060 runs on the
 Arm® Cortex-M7® core up to 600 MHz.
 
-.. image:: mimxrt1060_evk.jpg
-   :align: center
-   :alt: MIMXRT1060-EVK
 
 Hardware
 ********
@@ -103,7 +97,7 @@ Supported Features
 
 The mimxrt1060_evk board configuration supports the hardware features listed
 below.  For additional features not yet supported, please also refer to the
-:ref:`mimxrt1064_evk` , which is the superset board in NXP's i.MX RT10xx family.
+:zephyr:board:`mimxrt1064_evk` , which is the superset board in NXP's i.MX RT10xx family.
 NXP prioritizes enabling the superset board with NXP's Full Platform Support for
 Zephyr.  Therefore, the mimxrt1064_evk board may have additional features
 already supported, which can also be re-used on this mimxrt1060_evk board:
@@ -325,35 +319,31 @@ remaining are not used.
 Programming and Debugging
 *************************
 
-Build and flash applications as usual (see :ref:`build_an_application` and
-:ref:`application_run` for more details).
+This board supports 3 debug host tools. Please install your preferred host
+tool, then follow the instructions in `Configuring a Debug Probe`_ to
+configure the board appropriately.
+
+* :ref:`jlink-debug-host-tools` (Default, Supported by NXP)
+* :ref:`linkserver-debug-host-tools` (Supported by NXP)
+* :ref:`pyocd-debug-host-tools` (Not Supported by NXP)
+
+Once the host tool and board are configured, build and flash applications
+as usual (see :ref:`build_an_application` and :ref:`application_run` for more
+details).
 
 Configuring a Debug Probe
 =========================
 
-A debug probe is used for both flashing and debugging the board. This board is
-configured by default to use the :ref:`opensda-daplink-onboard-debug-probe`,
-however the :ref:`pyocd-debug-host-tools` do not yet support programming the
-external flashes on this board so you must reconfigure the board for one of the
-following debug probes instead.
+Two revisions of the RT1060 EVK exist. For the RT1060 EVK, J47/J48 are the SWD
+isolation jumpers, J42 is the DFU mode jumper, and the 20 pin JTAG/SWD header
+is present on J21. For the RT1060 EVKB, J9/J10 are the SWD isolation jumpers,
+J12 is the DFU mode jumper, and the 20 pin JTAG/SWD header is present on J2.
 
-.. _Using LinkServer:
+.. include:: ../../common/rt1xxx-lpclink2-debug.rst
+   :start-after: rt1xxx-lpclink2-probes
 
-        1. Install the :ref:`linkserver-debug-host-tools` and make sure they are in your search path.
-        2. To update the debug firmware, please follow the instructions on `MIMXRT1060-EVK Debug Firmware`
-
-.. _Using J-Link RT1060:
-
-Using J-Link
----------------------------------
-
-Install the :ref:`jlink-debug-host-tools` and make sure they are in your search
-path.
-
-There are two options: the onboard debug circuit can be updated with Segger
-J-Link firmware, or :ref:`jlink-external-debug-probe` can be attached to the
-EVK. See `Using J-Link with MIMXRT1060-EVK or MIMXRT1064-EVK`_ or
-`Using J-Link with MIMXRT1060-EVKB`_ for more details.
+See `Using J-Link with MIMXRT1060-EVK or MIMXRT1064-EVK`_ or `Using J-Link with
+MIMXRT1060-EVKB`_ for more details.
 
 Configuring a Console
 =====================
@@ -382,7 +372,7 @@ SWO frequency of 7500KHz.
 Flashing
 ========
 
-Here is an example for the :ref:`hello_world` application.
+Here is an example for the :zephyr:code-sample:`hello_world` application.
 
 .. zephyr-app-commands::
    :zephyr-app: samples/hello_world
@@ -400,7 +390,7 @@ see the following message in the terminal:
 Debugging
 =========
 
-Here is an example for the :ref:`hello_world` application.
+Here is an example for the :zephyr:code-sample:`hello_world` application.
 
 .. zephyr-app-commands::
    :zephyr-app: samples/hello_world
@@ -448,7 +438,7 @@ steps:
 
 If the west flash or debug commands fail, and the command hangs while executing
 runners.jlink, confirm the J-Link debug probe is configured, powered, and
-connected to the EVK properly. See :ref:`Using J-Link RT1060` for more details.
+connected to the EVK properly.
 
 .. _MIMXRT1060-EVK Website:
    https://www.nxp.com/design/development-boards/i-mx-evaluation-and-development-boards/i-mx-rt1060-evaluation-kit:MIMXRT1060-EVKB

@@ -4,6 +4,7 @@
 
 from enum import Enum
 
+
 # DocumentConfig contains settings used to configure how the SPDX Document
 # should be built.
 class DocumentConfig:
@@ -19,6 +20,7 @@ class DocumentConfig:
         # standardized DocumentRef- (including that prefix) that the other
         # docs will use to refer to this one
         self.docRefID = ""
+
 
 # Document contains the data assembled by the SBOM builder, to be used to
 # create the actual SPDX Document.
@@ -56,6 +58,7 @@ class Document:
         # written to disk, so that others can refer to it
         self.myDocSHA1 = ""
 
+
 # PackageConfig contains settings used to configure how an SPDX Package should
 # be built.
 class PackageConfig:
@@ -71,6 +74,18 @@ class PackageConfig:
         # primary package purpose (ex. "LIBRARY", "APPLICATION", etc.)
         self.primaryPurpose = ""
 
+        # package URL
+        self.url = ""
+
+        # package version
+        self.version = ""
+
+        # package revision
+        self.revision = ""
+
+        # package external references
+        self.externalReferences = []
+
         # the Package's declared license
         self.declaredLicense = "NOASSERTION"
 
@@ -82,6 +97,7 @@ class PackageConfig:
         # relative paths
         # may want to note this in a Package comment field
         self.relativeBaseDir = ""
+
 
 # Package contains the data assembled by the SBOM builder, to be used to
 # create the actual SPDX Package.
@@ -119,6 +135,7 @@ class Package:
         # If this Package was a target, which File was its main build product?
         self.targetBuildFile = None
 
+
 # RelationshipDataElementType defines whether a RelationshipData element
 # (e.g., the "owner" or the "other" element) is a File, a target Package,
 # a Package's ID (as other only, and only where owner type is DOCUMENT),
@@ -129,6 +146,7 @@ class RelationshipDataElementType(Enum):
     TARGETNAME = 2
     PACKAGEID = 3
     DOCUMENT = 4
+
 
 # RelationshipData contains the pre-analysis data about a relationship between
 # Files and/or Packages/targets. It is eventually parsed into a corresponding
@@ -167,6 +185,7 @@ class RelationshipData:
         # from table 68 in section 11.1 of SPDX spec v2.3
         self.rlnType = ""
 
+
 # Relationship contains the post-analysis, processed data about a relationship
 # in a form suitable for creating the actual SPDX Relationship in a particular
 # Document's context.
@@ -185,6 +204,7 @@ class Relationship:
         # text string with Relationship type
         # from table 68 in section 11.1 of SPDX spec v2.3
         self.rlnType = ""
+
 
 # File contains the data needed to create a File element in the context of a
 # particular SPDX Document and Package.

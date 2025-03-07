@@ -87,7 +87,7 @@ char *xtensa_exccause(unsigned int cause_code)
 void xtensa_fatal_error(unsigned int reason, const struct arch_esf *esf)
 {
 #ifdef CONFIG_EXCEPTION_DEBUG
-	if (esf) {
+	if (esf != NULL) {
 		/* Don't want to get elbowed by xtensa_switch
 		 * in between printing registers and dumping them;
 		 * corrupts backtrace
@@ -140,7 +140,7 @@ FUNC_NORETURN void arch_syscall_oops(void *ssf)
 #ifdef CONFIG_USERSPACE
 void z_impl_xtensa_user_fault(unsigned int reason)
 {
-	if ((_current->base.user_options & K_USER) != 0) {
+	if ((arch_current_thread()->base.user_options & K_USER) != 0) {
 		if ((reason != K_ERR_KERNEL_OOPS) &&
 				(reason != K_ERR_STACK_CHK_FAIL)) {
 			reason = K_ERR_KERNEL_OOPS;

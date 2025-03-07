@@ -37,11 +37,30 @@ SECTION_FUNC(reset, __reset)
  * Remainder of asm-land initialization code before we can jump into
  * the C domain
  */
+
+ /*
 SECTION_FUNC(TEXT, __initialize)
 	csrr a0, mhartid
 	li t0, CONFIG_RV_BOOT_HART
 	beq a0, t0, boot_first_core
 	j boot_secondary_core
+*/
+SECTION_FUNC(TEXT, __initialize)
+	csrr a0, mhartid
+	li t0, CONFIG_RV_BOOT_HART
+
+#ifdef CONFIG_STARTUP_TACIT
+    # Enable trace encoder as early as possible
+    li t1, 0x3000000                # Load base address of L_TRACE_ENCODER0
+    slli t2, a0, 12                 # Offset by hart_id * 0x1000
+    add t1, t1, t2                  # Calculate address for current hart
+    li t3, 0x2                      # Load value 0x2 (bit 1 set) to enable tracing
+    sw t3, 0(t1)                    # Write to TR_TE_CTRL
+#endif
+
+	beq a0, t0, boot_first_core
+	j boot_secondary_core
+
 
 boot_first_core:
 
@@ -62,7 +81,8 @@ boot_first_core:
 #ifdef CONFIG_INIT_STACKS
 	/* Pre-populate all bytes in z_interrupt_stacks with 0xAA */
 	la t0, z_interrupt_stacks
-	li t1, __z_interrupt_stack_SIZEOF
+	/* Total size of all cores' IRQ stack */
+	li t1, __z_interrupt_all_stacks_SIZEOF
 	add t1, t1, t0
 
 	/* Populate z_interrupt_stacks with 0xaaaaaaaa */
@@ -71,7 +91,7 @@ aa_loop:
 	sw t2, 0x00(t0)
 	addi t0, t0, 4
 	blt t0, t1, aa_loop
-#endif
+#endif /* CONFIG_INIT_STACKS */
 
 	/*
 	 * Initially, setup stack pointer to

@@ -162,8 +162,9 @@ static void lptim_set_autoreload(uint32_t arr)
 	/* Update autoreload register */
 	autoreload_next = arr;
 
-	if (!autoreload_ready)
+	if (!autoreload_ready) {
 		return;
+	}
 
 	/* The ARR register ready, we could set it directly */
 	if ((arr > 0) && (arr != LL_LPTIM_GetAutoReload(LPTIM))) {
@@ -204,7 +205,22 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 
 	next = pm_policy_next_state(CURRENT_CPU, ticks);
 
-	if ((next != NULL) && (next->state == PM_STATE_SUSPEND_TO_RAM)) {
+	/* Check if STANBY or STOP3 is requested */
+	timeout_stdby = false;
+	if ((next != NULL) && idle) {
+#ifdef CONFIG_PM_S2RAM
+		if (next->state == PM_STATE_SUSPEND_TO_RAM) {
+			timeout_stdby = true;
+		}
+#endif
+#ifdef CONFIG_STM32_STOP3_LP_MODE
+		if ((next->state == PM_STATE_SUSPEND_TO_IDLE) && (next->substate_id == 4)) {
+			timeout_stdby = true;
+		}
+#endif
+	}
+
+	if (timeout_stdby) {
 		uint64_t timeout_us =
 			((uint64_t)ticks * USEC_PER_SEC) / CONFIG_SYS_CLOCK_TICKS_PER_SEC;
 
@@ -214,8 +230,6 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 			.user_data = NULL,
 			.flags = 0,
 		};
-
-		timeout_stdby = true;
 
 		/* Set the alarm using timer that runs the standby.
 		 * Needed rump-up/setting time, lower accurency etc. should be
@@ -229,6 +243,9 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 		 */
 		counter_get_value(stdby_timer, &stdby_timer_pre_stdby);
 		lptim_cnt_pre_stdby = z_clock_lptim_getcounter();
+
+		/* Stop clocks for LPTIM, since RTC is used instead */
+		clock_control_off(clk_ctrl, (clock_control_subsys_t) &lptim_clk[0]);
 
 		return;
 	}
@@ -433,6 +450,26 @@ static int sys_clock_driver_init(void)
 	}
 #endif
 
+#if DT_INST_NODE_HAS_PROP(0, st_timeout)
+	/*
+	 * Check if prescaler corresponding to the DT_INST_PROP(0, st_timeout)
+	 * is matching the lptim_clock_presc calculated one from the lptim_clock_freq
+	 * max lptim period is 0xFFFF/(lptim_clock_freq/lptim_clock_presc)
+	 */
+	if (DT_INST_PROP(0, st_timeout) >
+		(lptim_clock_presc / lptim_clock_freq) * 0xFFFF) {
+		return -EIO;
+	}
+
+	/*
+	 * LPTIM is counting DT_INST_PROP(0, st_timeout),
+	 * seconds at lptim_clock_freq divided lptim_clock_presc) Hz",
+	 * lptim_time_base is the autoreload counter
+	 */
+	lptim_time_base = 2 * (lptim_clock_freq *
+		(uint32_t)DT_INST_PROP(0, st_timeout))
+		/ lptim_clock_presc;
+#else
 	/* Set LPTIM time base based on clock source freq */
 	if (lptim_clock_freq == KHZ(32)) {
 		lptim_time_base = 0xF9FF;
@@ -441,6 +478,8 @@ static int sys_clock_driver_init(void)
 	} else {
 		return -EIO;
 	}
+
+#endif /* st_timeout */
 
 #if !defined(CONFIG_STM32_LPTIM_TICK_FREQ_RATIO_OVERRIDE)
 	/*

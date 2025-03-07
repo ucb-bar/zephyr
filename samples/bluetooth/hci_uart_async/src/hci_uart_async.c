@@ -6,7 +6,6 @@
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/time_units.h>
 #include <zephyr/toolchain/common.h>
-#include <zephyr/drivers/bluetooth/hci_driver.h>
 #include <errno.h>
 #include <stddef.h>
 #include <string.h>
@@ -23,7 +22,7 @@
 
 #include <zephyr/usb/usb_device.h>
 
-#include <zephyr/net/buf.h>
+#include <zephyr/net_buf.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/l2cap.h>
 #include <zephyr/bluetooth/hci.h>
@@ -151,10 +150,11 @@ static void send_hw_error(void)
 
 	struct net_buf *buf = bt_buf_get_rx(BT_BUF_EVT, K_FOREVER);
 
+	net_buf_add_u8(buf, BT_HCI_H4_EVT);
 	net_buf_add_mem(buf, hci_evt_hw_err, sizeof(hci_evt_hw_err));
 
 	/* Inject the message into the c2h queue. */
-	bt_recv(buf);
+	k_fifo_put(&c2h_queue, buf);
 
 	/* The c2h thread will send the message at some point. The host
 	 * will receive it and reset the controller.
@@ -375,7 +375,7 @@ static void c2h_thread_entry(void)
 	for (;;) {
 		struct net_buf *buf;
 
-		buf = net_buf_get(&c2h_queue, K_FOREVER);
+		buf = k_fifo_get(&c2h_queue, K_FOREVER);
 		uart_c2h_tx(buf->data, buf->len);
 		net_buf_unref(buf);
 	}

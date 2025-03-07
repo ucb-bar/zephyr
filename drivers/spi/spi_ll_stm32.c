@@ -16,6 +16,7 @@ LOG_MODULE_REGISTER(spi_ll_stm32);
 #include <stm32_ll_spi.h>
 #include <errno.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/spi/rtio.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/toolchain.h>
 #include <zephyr/pm/policy.h>
@@ -122,31 +123,34 @@ static uint32_t bits2bytes(uint32_t bits)
 static __aligned(32) uint32_t dummy_rx_tx_buffer __nocache;
 
 /* This function is executed in the interrupt context */
-static void dma_callback(const struct device *dev, void *arg,
+static void dma_callback(const struct device *dma_dev, void *arg,
 			 uint32_t channel, int status)
 {
-	/* arg directly holds the spi device */
-	struct spi_stm32_data *data = arg;
+	ARG_UNUSED(dma_dev);
+
+	/* arg holds SPI DMA data
+	 * Passed in spi_stm32_dma_tx/rx_load()
+	 */
+	struct spi_stm32_data *spi_dma_data = arg;
 
 	if (status < 0) {
 		LOG_ERR("DMA callback error with channel %d.", channel);
-		data->status_flags |= SPI_STM32_DMA_ERROR_FLAG;
+		spi_dma_data->status_flags |= SPI_STM32_DMA_ERROR_FLAG;
 	} else {
 		/* identify the origin of this callback */
-		if (channel == data->dma_tx.channel) {
+		if (channel == spi_dma_data->dma_tx.channel) {
 			/* this part of the transfer ends */
-			data->status_flags |= SPI_STM32_DMA_TX_DONE_FLAG;
-		} else if (channel == data->dma_rx.channel) {
+			spi_dma_data->status_flags |= SPI_STM32_DMA_TX_DONE_FLAG;
+		} else if (channel == spi_dma_data->dma_rx.channel) {
 			/* this part of the transfer ends */
-			data->status_flags |= SPI_STM32_DMA_RX_DONE_FLAG;
+			spi_dma_data->status_flags |= SPI_STM32_DMA_RX_DONE_FLAG;
 		} else {
-			LOG_ERR("DMA callback channel %d is not valid.",
-								channel);
-			data->status_flags |= SPI_STM32_DMA_ERROR_FLAG;
+			LOG_ERR("DMA callback channel %d is not valid.", channel);
+			spi_dma_data->status_flags |= SPI_STM32_DMA_ERROR_FLAG;
 		}
 	}
 
-	k_sem_give(&data->status_sem);
+	k_sem_give(&spi_dma_data->status_sem);
 }
 
 static int spi_stm32_dma_tx_load(const struct device *dev, const uint8_t *buf,
@@ -197,7 +201,7 @@ static int spi_stm32_dma_tx_load(const struct device *dev, const uint8_t *buf,
 
 	/* direction is given by the DT */
 	stream->dma_cfg.head_block = blk_cfg;
-	/* give the client dev as arg, as the callback comes from the dma */
+	/* give the dma channel data as arg, as the callback comes from the dma */
 	stream->dma_cfg.user_data = data;
 	/* pass our client origin to the dma: data->dma_tx.dma_channel */
 	ret = dma_config(data->dma_tx.dma_dev, data->dma_tx.channel,
@@ -463,7 +467,7 @@ static void spi_stm32_cs_control(const struct device *dev, bool on)
 			LL_PWR_UnselectSUBGHZSPI_NSS();
 		}
 	}
-#endif
+#endif /* DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz) */
 }
 
 static void spi_stm32_complete(const struct device *dev, int status)
@@ -483,7 +487,7 @@ static void spi_stm32_complete(const struct device *dev, int status)
 	}
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi) */
 
-#endif
+#endif /* CONFIG_SPI_STM32_INTERRUPT */
 
 
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_fifo)
@@ -491,7 +495,7 @@ static void spi_stm32_complete(const struct device *dev, int status)
 	while (ll_func_rx_is_not_empty(spi)) {
 		(void) LL_SPI_ReceiveData8(spi);
 	}
-#endif
+#endif /* compat st_stm32_spi_fifo*/
 
 	if (LL_SPI_GetMode(spi) == LL_SPI_MODE_MASTER) {
 		while (ll_func_spi_is_busy(spi)) {
@@ -557,7 +561,7 @@ static void spi_stm32_isr(const struct device *dev)
 		spi_stm32_complete(dev, err);
 	}
 }
-#endif
+#endif /* CONFIG_SPI_STM32_INTERRUPT */
 
 static int spi_stm32_configure(const struct device *dev,
 			       const struct spi_config *config)
@@ -788,7 +792,7 @@ static int transceive(const struct device *dev,
 	if (asynchronous) {
 		return -ENOTSUP;
 	}
-#endif
+#endif /* CONFIG_SPI_STM32_INTERRUPT */
 
 	spi_context_lock(&data->ctx, asynchronous, cb, userdata, config);
 
@@ -819,13 +823,6 @@ static int transceive(const struct device *dev,
 
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi) */
 
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_fifo)
-	/* Flush RX buffer */
-	while (ll_func_rx_is_not_empty(spi)) {
-		(void) LL_SPI_ReceiveData8(spi);
-	}
-#endif
-
 	LL_SPI_Enable(spi);
 
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
@@ -842,13 +839,13 @@ static int transceive(const struct device *dev,
 	}
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi) */
 
-#if CONFIG_SOC_SERIES_STM32H7X
+#ifdef CONFIG_SOC_SERIES_STM32H7X
 	/*
 	 * Add a small delay after enabling to prevent transfer stalling at high
 	 * system clock frequency (see errata sheet ES0392).
 	 */
 	k_busy_wait(WAIT_1US);
-#endif
+#endif /* CONFIG_SOC_SERIES_STM32H7X */
 
 	/* This is turned off in spi_stm32_complete(). */
 	spi_stm32_cs_control(dev, true);
@@ -870,7 +867,7 @@ static int transceive(const struct device *dev,
 	ll_func_enable_int_tx_empty(spi);
 
 	ret = spi_context_wait_for_completion(&data->ctx);
-#else
+#else /* CONFIG_SPI_STM32_INTERRUPT */
 	do {
 		ret = spi_stm32_shift_frames(cfg, data);
 	} while (!ret && spi_stm32_transfer_ongoing(data));
@@ -883,7 +880,7 @@ static int transceive(const struct device *dev,
 	}
 #endif /* CONFIG_SPI_SLAVE */
 
-#endif
+#endif /* CONFIG_SPI_STM32_INTERRUPT */
 
 end:
 	spi_context_release(&data->ctx, ret);
@@ -979,6 +976,7 @@ static int transceive_dma(const struct device *dev,
 	struct spi_stm32_data *data = dev->data;
 	SPI_TypeDef *spi = cfg->spi;
 	int ret;
+	int err;
 
 	if (!tx_bufs && !rx_bufs) {
 		return 0;
@@ -1062,7 +1060,7 @@ static int transceive_dma(const struct device *dev,
 #ifdef SPI_SR_FTLVL
 		while (LL_SPI_GetTxFIFOLevel(spi) > 0) {
 		}
-#endif
+#endif /* SPI_SR_FTLVL */
 
 #ifdef CONFIG_SPI_STM32_ERRATA_BUSY
 		WAIT_FOR(ll_func_spi_dma_busy(spi) != 0,
@@ -1072,7 +1070,7 @@ static int transceive_dma(const struct device *dev,
 		/* wait until spi is no more busy (spi TX fifo is really empty) */
 		while (ll_func_spi_dma_busy(spi) == 0) {
 		}
-#endif
+#endif /* CONFIG_SPI_STM32_ERRATA_BUSY */
 
 #if !DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
 		/* toggle the DMA transfer request */
@@ -1095,8 +1093,14 @@ static int transceive_dma(const struct device *dev,
 	LL_SPI_DisableDMAReq_TX(spi);
 	LL_SPI_DisableDMAReq_RX(spi);
 
-	dma_stop(data->dma_rx.dma_dev, data->dma_rx.channel);
-	dma_stop(data->dma_tx.dma_dev, data->dma_tx.channel);
+	err = dma_stop(data->dma_rx.dma_dev, data->dma_rx.channel);
+	if (err) {
+		LOG_DBG("Rx dma_stop failed with error %d", err);
+	}
+	err = dma_stop(data->dma_tx.dma_dev, data->dma_tx.channel);
+	if (err) {
+		LOG_DBG("Tx dma_stop failed with error %d", err);
+	}
 
 #ifdef CONFIG_SPI_SLAVE
 	if (spi_context_is_slave(&data->ctx) && !ret) {
@@ -1142,10 +1146,13 @@ static int spi_stm32_transceive_async(const struct device *dev,
 }
 #endif /* CONFIG_SPI_ASYNC */
 
-static const struct spi_driver_api api_funcs = {
+static DEVICE_API(spi, api_funcs) = {
 	.transceive = spi_stm32_transceive,
 #ifdef CONFIG_SPI_ASYNC
 	.transceive_async = spi_stm32_transceive_async,
+#endif
+#ifdef CONFIG_SPI_RTIO
+	.iodev_submit = spi_rtio_iodev_default_submit,
 #endif
 	.release = spi_stm32_release,
 };
@@ -1159,7 +1166,7 @@ static inline bool spi_stm32_is_subghzspi(const struct device *dev)
 #else
 	ARG_UNUSED(dev);
 	return false;
-#endif
+#endif /* st_stm32_spi_subghz */
 }
 
 static int spi_stm32_init(const struct device *dev)
@@ -1201,7 +1208,7 @@ static int spi_stm32_init(const struct device *dev)
 
 #ifdef CONFIG_SPI_STM32_INTERRUPT
 	cfg->irq_config(dev);
-#endif
+#endif /* CONFIG_SPI_STM32_INTERRUPT */
 
 #ifdef CONFIG_SPI_STM32_DMA
 	if ((data->dma_rx.dma_dev != NULL) &&
@@ -1305,7 +1312,7 @@ static void spi_stm32_irq_config_func_##id(const struct device *dev)		\
 #define STM32_SPI_IRQ_HANDLER_DECL(id)
 #define STM32_SPI_IRQ_HANDLER_FUNC(id)
 #define STM32_SPI_IRQ_HANDLER(id)
-#endif
+#endif /* CONFIG_SPI_STM32_INTERRUPT */
 
 #define SPI_DMA_CHANNEL_INIT(index, dir, dir_cap, src_dev, dest_dev)	\
 	.dma_dev = DEVICE_DT_GET(STM32_DMA_CTLR(index, dir)),			\
@@ -1333,7 +1340,7 @@ static void spi_stm32_irq_config_func_##id(const struct device *dev)		\
 				STM32_DMA_FEATURES(index, dir)),		\
 
 
-#if CONFIG_SPI_STM32_DMA
+#ifdef CONFIG_SPI_STM32_DMA
 #define SPI_DMA_CHANNEL(id, dir, DIR, src, dest)			\
 	.dma_##dir = {							\
 		COND_CODE_1(DT_INST_DMAS_HAS_NAME(id, dir),		\
@@ -1346,7 +1353,7 @@ static void spi_stm32_irq_config_func_##id(const struct device *dev)		\
 #else
 #define SPI_DMA_CHANNEL(id, dir, DIR, src, dest)
 #define SPI_DMA_STATUS_SEM(id)
-#endif
+#endif /* CONFIG_SPI_STM32_DMA */
 
 #define SPI_SUPPORTS_FIFO(id)	DT_INST_NODE_HAS_PROP(id, fifo_enable)
 #define SPI_GET_FIFO_PROP(id)	DT_INST_PROP(id, fifo_enable)
@@ -1389,7 +1396,7 @@ static struct spi_stm32_data spi_stm32_dev_data_##id = {		\
 									\
 PM_DEVICE_DT_INST_DEFINE(id, spi_stm32_pm_action);			\
 									\
-DEVICE_DT_INST_DEFINE(id, &spi_stm32_init, PM_DEVICE_DT_INST_GET(id),	\
+SPI_DEVICE_DT_INST_DEFINE(id, spi_stm32_init, PM_DEVICE_DT_INST_GET(id),\
 		    &spi_stm32_dev_data_##id, &spi_stm32_cfg_##id,	\
 		    POST_KERNEL, CONFIG_SPI_INIT_PRIORITY,		\
 		    &api_funcs);					\

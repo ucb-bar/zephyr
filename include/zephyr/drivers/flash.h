@@ -57,10 +57,12 @@ struct flash_pages_layout {
  * through a runtime.
  */
 struct flash_parameters {
+	/** Minimal write alignment and size */
 	const size_t write_block_size;
-	/* Device capabilities. Only drivers are supposed to set the
-	 * capabilities directly, users need to call the FLASH_CAPS_
-	 * macros on pointer to flash_parameters to get capabilities.
+
+	/** @cond INTERNAL_HIDDEN */
+	/* User code should call flash_params_get_ functions on flash_parameters
+	 * to get capabilities, rather than accessing object contents directly.
 	 */
 	struct {
 		/* Device has no explicit erase, so it either erases on
@@ -70,7 +72,9 @@ struct flash_parameters {
 		 */
 		bool no_explicit_erase: 1;
 	} caps;
-	uint8_t erase_value; /* Byte value of erased flash */
+	/** @endcond */
+	/** Value the device is filled in erased areas */
+	uint8_t erase_value;
 };
 
 /** Set for ordinary Flash where erase is needed before write of random data */
@@ -105,6 +109,7 @@ int flash_params_get_erase_cap(const struct flash_parameters *p)
 #if defined(CONFIG_FLASH_HAS_NO_EXPLICIT_ERASE)
 	return (p->caps.no_explicit_erase) ? 0 : FLASH_ERASE_C_EXPLICIT;
 #else
+	ARG_UNUSED(p);
 	return FLASH_ERASE_C_EXPLICIT;
 #endif
 #endif
@@ -150,6 +155,18 @@ typedef int (*flash_api_write)(const struct device *dev, off_t offset,
 typedef int (*flash_api_erase)(const struct device *dev, off_t offset,
 			       size_t size);
 
+/**
+ * @brief Get device size in bytes.
+ *
+ * Returns total logical device size in bytes.
+ *
+ * @param[in] dev	flash device.
+ * @param[out] size	device size in bytes.
+ *
+ * @return 0 on success, negative errno code on error.
+ */
+typedef int (*flash_api_get_size)(const struct device *dev, uint64_t *size);
+
 typedef const struct flash_parameters* (*flash_api_get_parameters)(const struct device *dev);
 
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
@@ -190,6 +207,7 @@ __subsystem struct flash_driver_api {
 	flash_api_write write;
 	flash_api_erase erase;
 	flash_api_get_parameters get_parameters;
+	flash_api_get_size get_size;
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
 	flash_api_pages_layout page_layout;
 #endif /* CONFIG_FLASH_PAGE_LAYOUT */
@@ -316,6 +334,48 @@ static inline int z_impl_flash_erase(const struct device *dev, off_t offset,
 	return rc;
 }
 
+/**
+ * @brief Get device size in bytes.
+ *
+ * Returns total logical device size in bytes. Not all devices may support
+ * returning size, specifically those with non uniform page layouts or banked,
+ * in which case the function will return -ENOTSUP, and user has to rely
+ * on Flash page layout functions enabled by CONFIG_FLASH_PAGE_LAYOUT.
+ *
+ * @param[in] dev	flash device.
+ * @param[out] size	device size in bytes.
+ *
+ * @return 0 on success, negative errno code on error.
+ */
+__syscall int flash_get_size(const struct device *dev, uint64_t *size);
+
+static inline int z_impl_flash_get_size(const struct device *dev, uint64_t *size)
+{
+	int rc = -ENOSYS;
+	const struct flash_driver_api *api = (const struct flash_driver_api *)dev->api;
+
+	if (api->get_size != NULL) {
+		rc = api->get_size(dev, size);
+	}
+
+	return rc;
+}
+
+/**
+ * @brief Fill selected range of device with specified value
+ *
+ * Utility function that allows to fill specified range on a device with
+ * provided value. The @p offset and @p size of range need to be aligned to
+ * a write block size of a device.
+ *
+ * @param  dev             : flash device
+ * @param  val             : value to use for filling the range
+ * @param  offset          : offset of the range to fill
+ * @param  size            : size of the range
+ *
+ * @return  0 on success, negative errno code on fail.
+ *
+ */
 __syscall int flash_fill(const struct device *dev, uint8_t val, off_t offset, size_t size);
 
 /**
@@ -324,7 +384,7 @@ __syscall int flash_fill(const struct device *dev, uint8_t val, off_t offset, si
  *  If device is explicit erase type device or device driver provides erase
  *  callback, the callback of the device is called, in which it behaves
  *  the same way as flash_erase.
- *  If a device is does not require explicit erase, either because
+ *  If a device does not require explicit erase, either because
  *  it has no erase at all or has auto-erase/erase-on-write,
  *  and does not provide erase callback then erase is emulated by
  *  leveling selected device memory area with erase_value assigned to
@@ -563,6 +623,37 @@ static inline const struct flash_parameters *z_impl_flash_get_parameters(const s
 __syscall int flash_ex_op(const struct device *dev, uint16_t code,
 			  const uintptr_t in, void *out);
 
+/**
+ * @brief Copy flash memory from one device to another.
+ *
+ * Copy a region of flash memory from one place to another. The source and
+ * destination flash devices may be the same or different devices. However,
+ * this function will fail if the source and destination devices are the same
+ * if memory regions overlap and are not identical.
+ *
+ * The caller must supply a buffer of suitable size and ensure that the
+ * destination is erased beforehand, if necessary.
+ *
+ * @note If the source and destination devices are the same, and the source
+ * and destination offsets are also the same, this function succeeds without
+ * performing any copy operation.
+ *
+ * @param src_dev Source flash device.
+ * @param dst_dev Destination flash device.
+ * @param src_offset Offset within the source flash device.
+ * @param dst_offset Offset within the destination flash device.
+ * @param size Size of the region to copy, in bytes.
+ * @param[out] buf Pointer to a buffer of size @a buf_size.
+ * @param buf_size Size of the buffer pointed to by @a buf.
+ *
+ * @retval 0 on success
+ * @retval -EINVAL if an argument is invalid.
+ * @retval -EIO if an I/O error occurs.
+ * @retval -ENODEV if either @a src_dev or @a dst_dev are not ready.
+ */
+__syscall int flash_copy(const struct device *src_dev, off_t src_offset,
+			 const struct device *dst_dev, off_t dst_offset, off_t size, uint8_t *buf,
+			 size_t buf_size);
 /*
  *  Extended operation interface provides flexible way for supporting flash
  *  controller features. Code space is divided equally into Zephyr codes

@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <errno.h>
 
-#include <zephyr/net/buf.h>
+#include <zephyr/net_buf.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
@@ -556,12 +556,7 @@ int bt_mesh_resume(void)
 
 	bt_mesh_model_foreach(model_resume, NULL);
 
-	err = bt_mesh_adv_gatt_send();
-	if (err && (err != -ENOTSUP)) {
-		LOG_WRN("GATT send failed (err %d)", err);
-		return err;
-	}
-
+	bt_mesh_adv_gatt_update();
 	return 0;
 }
 

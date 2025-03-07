@@ -1,7 +1,4 @@
-.. _mimxrt1020_evk:
-
-NXP MIMXRT1020-EVK
-##################
+.. zephyr:board:: mimxrt1020_evk
 
 Overview
 ********
@@ -10,10 +7,6 @@ The i.MX RT1020 expands the i.MX RT crossover processor families by providing
 high-performance feature set in low-cost LQFP packages, further simplifying
 board design and layout for customers. The i.MX RT1020 runs on the Arm®
 Cortex®-M7 core at 500 MHz.
-
-.. image:: mimxrt1020_evk.jpg
-   :align: center
-   :alt: MIMXRT1020-EVK
 
 Hardware
 ********
@@ -81,7 +74,7 @@ Supported Features
 
 The mimxrt1020_evk board configuration supports the hardware features listed
 below.  For additional features not yet supported, please also refer to the
-:ref:`mimxrt1064_evk` , which is the superset board in NXP's i.MX RT10xx family.
+:zephyr:board:`mimxrt1064_evk` , which is the superset board in NXP's i.MX RT10xx family.
 NXP prioritizes enabling the superset board with NXP's Full Platform Support for
 Zephyr.  Therefore, the mimxrt1064_evk board may have additional features
 already supported, which can also be re-used on this mimxrt1020_evk board:
@@ -219,53 +212,26 @@ remaining are not used.
 Programming and Debugging
 *************************
 
-Build and flash applications as usual (see :ref:`build_an_application` and
-:ref:`application_run` for more details).
+This board supports 3 debug host tools. Please install your preferred host
+tool, then follow the instructions in `Configuring a Debug Probe`_ to
+configure the board appropriately.
+
+* :ref:`linkserver-debug-host-tools` (Default, Supported by NXP)
+* :ref:`jlink-debug-host-tools` (Supported by NXP)
+* :ref:`pyocd-debug-host-tools` (Not supported by NXP)
+
+Once the host tool and board are configured, build and flash applications
+as usual (see :ref:`build_an_application` and :ref:`application_run` for more
+details).
 
 Configuring a Debug Probe
 =========================
 
-A debug probe is used for both flashing and debugging the board. This board is
-configured by default to use the :ref:`opensda-daplink-onboard-debug-probe`,
-however the :ref:`pyocd-debug-host-tools` do not yet support programming the
-external flashes on this board so you must reconfigure the board for one of the
-following debug probes instead.
+For the RT1020, J47/J48 are the SWD isolation jumpers, J42 is the DFU
+mode jumper, and J16 is the 20 pin JTAG/SWD header.
 
-Using LinkServer
-----------------
-
-Install the :ref:`linkserver-debug-host-tools` and make sure they are in your
-search path.  LinkServer works with the default CMSIS-DAP firmware included in
-the on-board debugger.
-
-Linkserver is the default runner. You may also se the ``-r linkserver`` option
-with West to use the LinkServer runner.
-
-.. code-block:: console
-
-   west flash
-   west debug
-
-JLink (on-board): :ref:`opensda-jlink-onboard-debug-probe`
-----------------------------------------------------------
-
-Install the :ref:`jlink-debug-host-tools` and make sure they are in your search
-path.
-
-Follow the instructions in :ref:`opensda-jlink-onboard-debug-probe` to program
-the `OpenSDA J-Link MIMXRT1020-EVK Firmware`_. Check that jumpers J27 and J28
-are **on** (they are on by default when boards ship from the factory) to ensure
-SWD signals are connected to the OpenSDA microcontroller.
-
-External JLink: :ref:`jlink-external-debug-probe`
--------------------------------------------------
-
-Install the :ref:`jlink-debug-host-tools` and make sure they are in your search
-path.
-
-Attach a J-Link 20-pin connector to J16. Check that jumpers J27 and J28 are
-**off** (they are on by default when boards ship from the factory) to ensure
-SWD signals are disconnected from the OpenSDA microcontroller.
+.. include:: ../../common/rt1xxx-lpclink2-debug.rst
+   :start-after: rt1xxx-lpclink2-probes
 
 Configuring a Console
 =====================
@@ -288,7 +254,7 @@ etc.):
 Flashing
 ========
 
-Here is an example for the :ref:`hello_world` application.
+Here is an example for the :zephyr:code-sample:`hello_world` application.
 
 .. zephyr-app-commands::
    :zephyr-app: samples/hello_world
@@ -306,7 +272,7 @@ see the following message in the terminal:
 Debugging
 =========
 
-Here is an example for the :ref:`hello_world` application.
+Here is an example for the :zephyr:code-sample:`hello_world` application.
 
 .. zephyr-app-commands::
    :zephyr-app: samples/hello_world

@@ -16,14 +16,16 @@ ram: 65536
 flash: 65536
 supported:
   - adc
-  - counter
   - can
+  - counter
   - dma
+  - flash
   - gpio
   - hwinfo
   - i2c
   - mipi_dsi
   - spi
   - usb_device
+  - video
   - watchdog
 vendor: nxp

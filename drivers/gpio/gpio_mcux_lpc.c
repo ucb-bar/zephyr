@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define DT_DRV_COMPAT nxp_lpc_gpio
+#define DT_DRV_COMPAT nxp_lpc_gpio_port
 
 /** @file
  * @brief GPIO driver for LPC54XXX family
@@ -414,7 +414,7 @@ static int gpio_mcux_lpc_init(const struct device *dev)
 	return 0;
 }
 
-static const struct gpio_driver_api gpio_mcux_lpc_driver_api = {
+static DEVICE_API(gpio, gpio_mcux_lpc_driver_api) = {
 	.pin_configure = gpio_mcux_lpc_configure,
 	.port_get_raw = gpio_mcux_lpc_port_get_raw,
 	.port_set_masked_raw = gpio_mcux_lpc_port_set_masked_raw,
@@ -457,10 +457,10 @@ static const struct gpio_driver_api gpio_mcux_lpc_driver_api = {
 		.common = {								\
 			.port_pin_mask = GPIO_PORT_PIN_MASK_FROM_DT_INST(n),		\
 		},									\
-		.gpio_base = GPIO,							\
+		.gpio_base = (GPIO_Type *)DT_REG_ADDR(DT_INST_PARENT(n)),		\
 		.pinmux_base = PINMUX_BASE,						\
 		.int_source = DT_INST_ENUM_IDX(n, int_source),				\
-		.port_no = DT_INST_PROP(n, port)					\
+		.port_no = DT_INST_REG_ADDR(n)						\
 	};										\
 											\
 	static struct gpio_mcux_lpc_data gpio_mcux_lpc_data_##n;			\

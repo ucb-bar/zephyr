@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 NXP
+ * Copyright 2021, 2024 NXP
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -171,6 +171,13 @@ EXTERN(ext_man_fw_ver)
 
 SECTIONS
 {
+
+#ifdef CONFIG_OPENAMP_RSC_TABLE
+    SECTION_PROLOGUE(.resource_table,, SUBALIGN(4))
+    {
+      KEEP(*(.resource_table*))
+    } GROUP_LINK_IN(ROMABLE_REGION)
+#endif
 
 #include <zephyr/linker/rel-sections.ld>
 
@@ -365,6 +372,10 @@ SECTIONS
   } >sdram0 :sdram0_phdr
 
 #include <zephyr/linker/common-rom.ld>
+/* Located in generated directory. This file is populated by calling
+ * zephyr_linker_sources(ROM_SECTIONS ...). Useful for grouping iterable RO structs.
+ */
+#include <snippets-rom-sections.ld>
 
   .fw_ready : ALIGN(4)
   {
@@ -518,4 +529,6 @@ SECTIONS
     KEEP (*(.fw_metadata))
     . = ALIGN(_EXT_MAN_ALIGN_);
   } >fw_metadata_seg :metadata_entries_phdr
+
+  /DISCARD/ : { *(.note.GNU-stack) }
 }

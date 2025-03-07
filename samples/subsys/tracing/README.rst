@@ -33,7 +33,9 @@ or:
 	:goals: build
 	:compact:
 
-.. note:: You may need to set "zephyr,tracing-uart" property under the chosen node in your devicetree. See :zephyr_file:`boards/mps2_an521.overlay` for an example.
+.. note::
+   You may need to set "zephyr,tracing-uart" property under the chosen node in your devicetree.
+   See :zephyr_file:`samples/subsys/tracing/boards/mps2_an521_cpu0.overlay` for an example.
 
 After the application has run for a while, check the trace output file.
 
@@ -107,6 +109,34 @@ Build a USER-tracing image with:
 	:zephyr-app: samples/subsys/tracing
 	:board: qemu_x86
 	:conf: "prj_user.conf"
+	:goals: build
+	:compact:
+
+After the application has run for a while, check the trace output file.
+
+Usage for SEGGER SystemView RTT
+*******************************
+
+Build a SystemView-tracing image with the :ref:`snippet-rtt-tracing`:
+
+.. zephyr-app-commands::
+	:zephyr-app: samples/subsys/tracing
+	:board: frdm_k64f
+	:snippets: rtt-tracing
+	:goals: build
+	:compact:
+
+After the application has run for a while, check the trace output file.
+
+Usage for GPIO Tracing Backend
+*******************************
+
+Build a GPIO-tracing image with:
+
+.. zephyr-app-commands::
+	:zephyr-app: samples/subsys/tracing
+	:board: native_sim
+	:conf: "prj_gpio.conf"
 	:goals: build
 	:compact:
 

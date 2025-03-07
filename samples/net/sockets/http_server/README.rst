@@ -20,6 +20,20 @@ Requirement
 Building and running the server
 -------------------------------
 
+There are configuration files for various setups in the
+:zephyr_file:`samples/net/sockets/http_server` directory:
+
+.. list-table::
+
+    * - :zephyr_file:`prj.conf <samples/net/sockets/http_server/prj.conf>`
+      - This is the standard default config.
+
+    * - :zephyr_file:`ieee802154-overlay.conf <samples/net/sockets/http_server/ieee802154-overlay.conf>`
+      - This overlay config can be added for IEEE 802.15.4 support.
+
+    * - :zephyr_file:`overlay-netusb.conf <samples/net/sockets/http_server/overlay-netusb.conf>`
+      - This overlay config can be added for connecting via network USB.
+
 To build and run the application:
 
 .. code-block:: bash
@@ -40,6 +54,35 @@ HTTP/2 protocol from the host machine.
 - Using nghttp client: ``nghttp -v --no-dep http://192.0.2.1/``
 - Using curl: ``curl --http2 -v --compressed http://192.0.2.1/``
 - Using h2load: ``h2load -n10 http://192.0.2.1/``
+
+Web browsers use stricter security settings for the HTTP/2 protocol. So to use HTTP/2
+with a web browser, you must enable ``CONFIG_NET_SAMPLE_HTTPS_SERVICE`` and
+``CONFIG_NET_SAMPLE_HTTPS_USE_ALPN``. Additionally the server certificate must be signed
+by a CA certificate trusted by your browser.
+
+The best way to do this is to generate your own CA certificate:
+
+.. code-block:: bash
+
+   $ west build -b <board_to_use> -t sample_ca_cert samples/net/sockets/http_server
+
+Generate a server certificate signed by this CA certificate:
+
+.. code-block:: bash
+
+   $ west build -t sample_server_cert samples/net/sockets/http_server
+
+And then build the application with the newly generated server certificate and key:
+
+.. code-block:: bash
+
+   $ west build samples/net/sockets/http_server
+
+The CA certificate should be added to your browser's list of trusted authorities to
+enable usage of HTTP/2. If using Firefox, it may also be required to change the setting
+``network.http.http2.enforce-tls-profile`` to false, since it seems that using a CA
+certificate issued by an authority unknown to Firefox is considered a security error when
+using HTTP/2.
 
 Server Customization
 ---------------------
@@ -82,7 +125,7 @@ connectivity.
 
    websocket.enableTrace(True)
    ws = websocket.WebSocket()
-   ws.connect("ws://192.0.2.1/")
+   ws.connect("ws://192.0.2.1/ws_echo")
    ws.send("Hello, Server")
    print(ws.recv())
    while True:
@@ -103,7 +146,7 @@ CPU Usage Profiling
 We can use ``perf`` to collect statistics about the CPU usage of our server
 running in native_sim board with the ``stat`` command:
 
-.. code-block:: bash
+.. code-block:: console
 
    $ sudo perf stat -p <pid_of_server>
 
@@ -117,14 +160,14 @@ Hotspot Analysis
 ``perf record`` and ``perf report`` can be used together to identify the
 functions in our code that consume the most CPU time:
 
-.. code-block:: bash
+.. code-block:: console
 
    $ sudo perf record -g -p <pid_of_server> -o perf.data
 
 After running our server under load (For example, using ApacheBench tool),
 we can stop the recording and analyze the data using:
 
-.. code-block:: bash
+.. code-block:: console
 
    $ sudo perf report -i perf.data
 
@@ -136,13 +179,13 @@ spending the most time.
 To do this, we need to convert the ``perf.data`` to a format that ``FlameGraph``
 can understand:
 
-.. code-block:: bash
+.. code-block:: console
 
    $ sudo perf script | ~/FlameGraph/stackcollapse-perf.pl > out.perf-folded
 
 And, then, generate the ``FlameGraph``:
 
-.. code-block:: bash
+.. code-block:: console
 
    $ ~/FlameGraph/flamegraph.pl out.perf-folded > flamegraph.svg
 

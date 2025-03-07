@@ -1,7 +1,4 @@
-.. _mimxrt1010_evk:
-
-NXP MIMXRT1010-EVK
-##################
+.. zephyr:board:: mimxrt1010_evk
 
 Overview
 ********
@@ -10,10 +7,6 @@ The i.MX RT1010 offer a new entry-point into the i.MX RT crossover processor
 series by providing the lowest-cost LQFP package option, combined with the
 high performance and ease-of-use known throughout the entire i.MX RT series.
 This device is fully supported by NXP’s MCUXpresso Software and Tools.
-
-.. image:: mimxrt1010_evk.jpg
-   :align: center
-   :alt: MIMXRT1010-EVK
 
 Hardware
 ********
@@ -69,7 +62,7 @@ Supported Features
 
 The mimxrt1010_evk board configuration supports the hardware features listed
 below.  For additional features not yet supported, please also refer to the
-:ref:`mimxrt1064_evk` , which is the superset board in NXP's i.MX RT10xx family.
+:zephyr:board:`mimxrt1064_evk` , which is the superset board in NXP's i.MX RT10xx family.
 NXP prioritizes enabling the superset board with NXP's Full Platform Support for
 Zephyr.  Therefore, the mimxrt1064_evk board may have additional features
 already supported, which can also be re-used on this mimxrt1010_evk board:
@@ -159,45 +152,26 @@ and the remaining are not used.
 Programming and Debugging
 *************************
 
-Build and flash applications as usual (see :ref:`build_an_application` and
-:ref:`application_run` for more details).
+This board supports 3 debug host tools. Please install your preferred host
+tool, then follow the instructions in `Configuring a Debug Probe`_ to
+configure the board appropriately.
+
+* :ref:`linkserver-debug-host-tools` (Default, Supported by NXP)
+* :ref:`jlink-debug-host-tools` (Supported by NXP)
+* :ref:`pyocd-debug-host-tools` (Not supported by NXP)
+
+Once the host tool and board are configured, build and flash applications
+as usual (see :ref:`build_an_application` and :ref:`application_run` for more
+details).
 
 Configuring a Debug Probe
 =========================
 
-A debug probe is used for both flashing and debugging the board. This board is
-configured by default to use the :ref:`opensda-daplink-onboard-debug-probe`,
-however the :ref:`pyocd-debug-host-tools` do not yet support programming the
-external flashes on this board so you must reconfigure the board for one of the
-following debug probes instead.
+For the RT1010, J61/J62 are the SWD isolation jumpers, J22 is the DFU
+mode jumper, and J16 is the 10 pin JTAG/SWD header.
 
-:ref:`jlink-external-debug-probe`
--------------------------------------------
-
-Install the :ref:`jlink-debug-host-tools` and make sure they are in your search
-path.
-
-Attach a J-Link 10-pin connector to J55. Check that jumpers J61 and J62 are
-**off** (they are on by default when boards ship from the factory) to ensure
-SWD signals are disconnected from the OpenSDA microcontroller.
-
-Using LinkServer
-----------------
-
-Install the :ref:`linkserver-debug-host-tools` and make sure they are in your
-search path. To use LinkServer the on board CMSIS-DAP firmware need updated with
-LPCScrypt installed with LinkServer.
-
-To enter board debuger FW update mode, connect J22 first, and power cycle board.
-For more details please refer to `Debug_Probe_Firmware_Programming.pdf`, which is
-installed with LinkServer.
-
-.. code-block:: console
-
-    :Ubuntu/Mac: scripts/program_CMSIS
-    :Windows: scripts/program_CMSIS.cmd
-
-You may also se the ``-r linkserver`` option with West to use the LinkServer.
+.. include:: ../../common/rt1xxx-lpclink2-debug.rst
+   :start-after: rt1xxx-lpclink2-probes
 
 Configuring a Console
 =====================
@@ -220,7 +194,7 @@ etc.):
 Flashing
 ========
 
-Here is an example for the :ref:`hello_world` application.
+Here is an example for the :zephyr:code-sample:`hello_world` application.
 
 .. zephyr-app-commands::
     :zephyr-app: samples/hello_world

@@ -1,26 +1,38 @@
 /*
  * Copyright (c) 2024 Demant A/S
+ * Copyright (c) 2024 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/types.h>
-#include <stddef.h>
-#include <strings.h>
 #include <errno.h>
-#include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <strings.h>
 
-#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/autoconf.h>
+#include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/audio/audio.h>
 #include <zephyr/bluetooth/audio/bap.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gap.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/hci_types.h>
+#include <zephyr/bluetooth/iso.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/kernel.h>
+#include <zephyr/net_buf.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/types.h>
 
 #define NAME_LEN 30
 #define PA_SYNC_SKIP         5
 #define PA_SYNC_INTERVAL_TO_TIMEOUT_RATIO 20 /* Set the timeout relative to interval */
 /* Broadcast IDs are 24bit, so this is out of valid range */
-#define INVALID_BROADCAST_ID 0xFFFFFFFFU
 
 static void scan_for_broadcast_sink(void);
 
@@ -42,7 +54,7 @@ static uint16_t selected_pa_interval;
 static bt_addr_le_t selected_addr;
 static struct bt_le_per_adv_sync *pa_sync;
 static uint8_t received_base[UINT8_MAX];
-static uint8_t received_base_size;
+static size_t received_base_size;
 static struct bt_bap_bass_subgroup
 	bass_subgroups[CONFIG_BT_BAP_BASS_MAX_SUBGROUPS];
 
@@ -133,7 +145,7 @@ static bool device_found(struct bt_data *data, void *user_data)
 static bool base_store(struct bt_data *data, void *user_data)
 {
 	const struct bt_bap_base *base = bt_bap_base_get_base_from_ad(data);
-	uint8_t base_size;
+	int base_size;
 	int base_subgroup_count;
 
 	/* Base is NULL if the data does not contain a valid BASE */
@@ -148,13 +160,19 @@ static bool base_store(struct bt_data *data, void *user_data)
 		return true;
 	}
 
-	base_size = data->data_len - BT_UUID_SIZE_16; /* the BASE comes after the UUID */
+	base_size = bt_bap_base_get_size(base);
+	if (base_size < 0) {
+		printk("BASE get size failed (%d)\n", base_size);
+
+		return true;
+	}
 
 	/* Compare BASE and copy if different */
 	k_mutex_lock(&base_store_mutex, K_FOREVER);
-	if (base_size != received_base_size || memcmp(base, received_base, base_size) != 0) {
+	if ((size_t)base_size != received_base_size ||
+	    memcmp(base, received_base, (size_t)base_size) != 0) {
 		(void)memcpy(received_base, base, base_size);
-		received_base_size = base_size;
+		received_base_size = (size_t)base_size;
 	}
 	k_mutex_unlock(&base_store_mutex);
 
@@ -175,7 +193,7 @@ static bool add_pa_sync_base_subgroup_bis_cb(const struct bt_bap_base_subgroup_b
 {
 	struct bt_bap_bass_subgroup *subgroup_param = user_data;
 
-	subgroup_param->bis_sync |= BIT(bis->index);
+	subgroup_param->bis_sync |= BT_ISO_BIS_INDEX_BIT(bis->index);
 
 	return true;
 }
@@ -242,12 +260,13 @@ static uint16_t interval_to_sync_timeout(uint16_t pa_interval)
 		/* Use maximum value to maximize chance of success */
 		pa_timeout = BT_GAP_PER_ADV_MAX_TIMEOUT;
 	} else {
-		uint32_t interval_ms;
+		uint32_t interval_us;
 		uint32_t timeout;
 
 		/* Add retries and convert to unit in 10's of ms */
-		interval_ms = BT_GAP_PER_ADV_INTERVAL_TO_MS(pa_interval);
-		timeout = (interval_ms * PA_SYNC_INTERVAL_TO_TIMEOUT_RATIO) / 10;
+		interval_us = BT_GAP_PER_ADV_INTERVAL_TO_US(pa_interval);
+		timeout = BT_GAP_US_TO_PER_ADV_SYNC_TIMEOUT(interval_us) *
+			  PA_SYNC_INTERVAL_TO_TIMEOUT_RATIO;
 
 		/* Enforce restraints */
 		pa_timeout = CLAMP(timeout, BT_GAP_PER_ADV_MIN_TIMEOUT, BT_GAP_PER_ADV_MAX_TIMEOUT);
@@ -278,7 +297,7 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info,
 	if (scanning_for_broadcast_source) {
 		/* Scan for and select Broadcast Source */
 
-		sr_info.broadcast_id = INVALID_BROADCAST_ID;
+		sr_info.broadcast_id = BT_BAP_INVALID_BROADCAST_ID;
 
 		/* We are only interested in non-connectable periodic advertisers */
 		if ((info->adv_props & BT_GAP_ADV_PROP_CONNECTABLE) != 0 ||
@@ -288,7 +307,7 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info,
 
 		bt_data_parse(ad, device_found, (void *)&sr_info);
 
-		if (sr_info.broadcast_id != INVALID_BROADCAST_ID) {
+		if (sr_info.broadcast_id != BT_BAP_INVALID_BROADCAST_ID) {
 			printk("Broadcast Source Found:\n");
 			printk("  BT Name:        %s\n", sr_info.bt_name);
 			printk("  Broadcast Name: %s\n", sr_info.broadcast_name);
@@ -433,7 +452,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	(void)bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (err != 0) {
-		printk("Failed to connect to %s (%u)\n", addr, err);
+		printk("Failed to connect to %s %u %s\n", addr, err, bt_hci_err_to_str(err));
 
 		bt_conn_unref(broadcast_sink_conn);
 		broadcast_sink_conn = NULL;
@@ -460,7 +479,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	(void)bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	printk("Disconnected: %s (reason 0x%02x)\n", addr, reason);
+	printk("Disconnected: %s, reason 0x%02x %s\n", addr, reason, bt_hci_err_to_str(reason));
 
 	bt_conn_unref(broadcast_sink_conn);
 	broadcast_sink_conn = NULL;
@@ -475,7 +494,7 @@ static void security_changed_cb(struct bt_conn *conn, bt_security_t level,
 		printk("Security level changed: %u\n", level);
 		k_sem_give(&sem_security_updated);
 	} else {
-		printk("Failed to set security level: %u\n", err);
+		printk("Failed to set security level: %s(%u)\n", bt_security_err_to_str(err), err);
 	}
 }
 
@@ -526,7 +545,7 @@ static void reset(void)
 	printk("\n\nReset...\n\n");
 
 	broadcast_sink_conn = NULL;
-	selected_broadcast_id = INVALID_BROADCAST_ID;
+	selected_broadcast_id = BT_BAP_INVALID_BROADCAST_ID;
 	selected_sid = 0;
 	selected_pa_interval = 0;
 	(void)memset(&selected_addr, 0, sizeof(selected_addr));

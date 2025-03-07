@@ -101,11 +101,8 @@ static void dma_xmc4xxx_isr(const struct device *dev)
 		struct dma_xmc4xxx_channel *dma_channel;
 
 		dma_channel = &dev_data->channels[i];
-		if (dma_channel->cb && dma_channel->dlr_line != DLR_LINE_UNSET &&
+		if (dma_channel->dlr_line != DLR_LINE_UNSET &&
 		    sr_overruns & BIT(dma_channel->dlr_line)) {
-
-			LOG_ERR("Overruns detected on channel %d", i);
-			dma_channel->cb(dev, dma_channel->user_data, i, -EIO);
 
 			/* From XMC4700/4800 reference documentation - Section 4.4.1 */
 			/* Once the overrun condition is entered the user can clear the */
@@ -114,6 +111,11 @@ static void dma_xmc4xxx_isr(const struct device *dev)
 			/* disabling and enabling the respective line. */
 			DLR->LNEN &= ~BIT(dma_channel->dlr_line);
 			DLR->LNEN |= BIT(dma_channel->dlr_line);
+
+			LOG_ERR("Overruns detected on channel %d", i);
+			if (dma_channel->cb != NULL) {
+				dma_channel->cb(dev, dma_channel->user_data, i, -EIO);
+			}
 		}
 	}
 }
@@ -393,7 +395,7 @@ static int dma_xmc4xxx_get_status(const struct device *dev, uint32_t channel,
 
 	stat->pending_length  = dma_channel->block_ts - XMC_DMA_CH_GetTransferredData(dma, channel);
 	stat->pending_length *= dma_channel->source_data_size;
-	/* stat->dir and other remaining fields are not set. They are are not */
+	/* stat->dir and other remaining fields are not set. They are not */
 	/* useful for xmc4xxx peripheral drivers. */
 
 	return 0;
@@ -455,7 +457,7 @@ static int dma_xmc4xxx_init(const struct device *dev)
 	return 0;
 }
 
-static const struct dma_driver_api dma_xmc4xxx_driver_api = {
+static DEVICE_API(dma, dma_xmc4xxx_driver_api) = {
 	.config = dma_xmc4xxx_config,
 	.reload = dma_xmc4xxx_reload,
 	.start = dma_xmc4xxx_start,

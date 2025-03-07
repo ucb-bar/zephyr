@@ -92,7 +92,7 @@ The above figure illustrates some states, from (a) to (d), for channels from ``C
 ``Subscriber 1``, and the observations. The last two are in orange to indicate they are dynamically
 allocated (runtime observation). (a) shows that the observer and all observations are enabled. (b)
 shows the observer is disabled, so the event dispatcher will ignore it. (c) shows the observer
-enabled. However, there is one static observervation disabled. The event dispatcher will only stop
+enabled. However, there is one static observation disabled. The event dispatcher will only stop
 sending notifications from channel ``C3``.  In (d), the event dispatcher will stop sending
 notifications from channels ``C3`` and ``C5`` to ``Subscriber 1``.
 
@@ -380,7 +380,8 @@ Limitations
 Based on the fact that developers can use zbus to solve many different problems, some challenges
 arise. ZBus will not solve every problem, so it is necessary to analyze the situation to be sure
 zbus is applicable. For instance, based on the zbus benchmark, it would not be well suited to a
-high-speed stream of bytes between threads. The `Pipe` kernel object solves this kind of need.
+high-speed stream of bytes between threads. The :ref:`Pipe <pipes_v2>` kernel object solves this
+kind of need.
 
 Delivery guarantees
 -------------------
@@ -397,18 +398,20 @@ rate by following design tips:
 * Consider using message queues or pipes for intensive byte transfers.
 
 .. warning::
-   ZBus uses :zephyr_file:`include/zephyr/net/buf.h` (network buffers) to exchange data with message
-   subscribers. So, chose carefully the configurations
+   ZBus uses :zephyr_file:`include/zephyr/net_buf.h` (network buffers) to exchange data with message
+   subscribers. Thus, choose carefully the configurations
    :kconfig:option:`CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_SIZE` and
    :kconfig:option:`CONFIG_HEAP_MEM_POOL_SIZE`. They are crucial to a proper VDED execution
-   (delivery guarantee) considering message subscribers.
+   (delivery guarantee) considering message subscribers. If you want to keep an isolated pool for a
+   specific set of channels, you can use
+   :kconfig:option:`CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_ISOLATION` with a dedicated pool. Look
+   at the :zephyr:code-sample:`zbus-msg-subscriber` to see the isolation in action.
 
 .. warning::
    Subscribers will receive only the reference of the changing channel. A data loss may be perceived
    if the channel is published twice before the subscriber reads it. The second publication
    overwrites the value from the first. Thus, the subscriber will receive two notifications, but
    only the last data is there.
-
 
 
 .. _zbus delivery sequence:
@@ -522,12 +525,12 @@ sequence of the static observers.
    notified.
 
 
-Channels can have a `validator function` that enables a channel to accept only valid messages.
+Channels can have a *validator function* that enables a channel to accept only valid messages.
 Publish attempts invalidated by hard channels will return immediately with an error code. This
 allows original creators of a channel to exert some authority over other developers/publishers who
 may want to piggy-back on their channels. The following code defines and initializes a :dfn:`hard
 channel` and its dependencies. Only valid messages can be published to a :dfn:`hard channel`. It is
-possible because a `validator function` was passed to the channel's definition. In this example,
+possible because a *validator function* was passed to the channel's definition. In this example,
 only messages with ``move`` equal to 0, -1, and 1 are valid. Publish function will discard all other
 values to ``move``.
 
@@ -898,6 +901,8 @@ Related configuration options:
   buffers;
 * :kconfig:option:`CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_SIZE` the available number of message
   buffers to be used simultaneously;
+* :kconfig:option:`CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_ISOLATION` enables the developer to isolate
+  a pool for the message subscriber for a set of channels;
 * :kconfig:option:`CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_STATIC_DATA_SIZE` the biggest message of zbus
   channels to be transported into a message buffer;
 * :kconfig:option:`CONFIG_ZBUS_RUNTIME_OBSERVERS` enables the runtime observer registration.

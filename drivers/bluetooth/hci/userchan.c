@@ -30,11 +30,19 @@
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
-#include <zephyr/drivers/bluetooth/hci_driver.h>
+#include <zephyr/drivers/bluetooth.h>
 
 #define LOG_LEVEL CONFIG_BT_HCI_DRIVER_LOG_LEVEL
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(bt_driver);
+
+#define DT_DRV_COMPAT zephyr_bt_hci_userchan
+
+struct uc_data {
+	int           fd;
+	bt_hci_recv_t recv;
+
+};
 
 #define BTPROTO_HCI      1
 struct sockaddr_hci {
@@ -49,8 +57,6 @@ struct sockaddr_hci {
 static K_KERNEL_STACK_DEFINE(rx_thread_stack,
 			     CONFIG_ARCH_POSIX_RECOMMENDED_STACK_SIZE);
 static struct k_thread rx_thread_data;
-
-static int uc_fd = -1;
 
 static unsigned short bt_dev_index;
 
@@ -105,6 +111,9 @@ static int32_t hci_packet_complete(const uint8_t *buf, uint16_t buf_len)
 
 	switch (type) {
 	case BT_HCI_H4_CMD: {
+		if (buf_len < header_len + BT_HCI_CMD_HDR_SIZE) {
+			return 0;
+		}
 		const struct bt_hci_cmd_hdr *cmd = (const struct bt_hci_cmd_hdr *)hdr;
 
 		/* Parameter Total Length */
@@ -113,6 +122,9 @@ static int32_t hci_packet_complete(const uint8_t *buf, uint16_t buf_len)
 		break;
 	}
 	case BT_HCI_H4_ACL: {
+		if (buf_len < header_len + BT_HCI_ACL_HDR_SIZE) {
+			return 0;
+		}
 		const struct bt_hci_acl_hdr *acl = (const struct bt_hci_acl_hdr *)hdr;
 
 		/* Data Total Length */
@@ -121,6 +133,9 @@ static int32_t hci_packet_complete(const uint8_t *buf, uint16_t buf_len)
 		break;
 	}
 	case BT_HCI_H4_SCO: {
+		if (buf_len < header_len + BT_HCI_SCO_HDR_SIZE) {
+			return 0;
+		}
 		const struct bt_hci_sco_hdr *sco = (const struct bt_hci_sco_hdr *)hdr;
 
 		/* Data_Total_Length */
@@ -129,6 +144,9 @@ static int32_t hci_packet_complete(const uint8_t *buf, uint16_t buf_len)
 		break;
 	}
 	case BT_HCI_H4_EVT: {
+		if (buf_len < header_len + BT_HCI_EVT_HDR_SIZE) {
+			return 0;
+		}
 		const struct bt_hci_evt_hdr *evt = (const struct bt_hci_evt_hdr *)hdr;
 
 		/* Parameter Total Length */
@@ -137,6 +155,9 @@ static int32_t hci_packet_complete(const uint8_t *buf, uint16_t buf_len)
 		break;
 	}
 	case BT_HCI_H4_ISO: {
+		if (buf_len < header_len + BT_HCI_ISO_HDR_SIZE) {
+			return 0;
+		}
 		const struct bt_hci_iso_hdr *iso = (const struct bt_hci_iso_hdr *)hdr;
 
 		/* ISO_Data_Load_Length parameter */
@@ -151,29 +172,31 @@ static int32_t hci_packet_complete(const uint8_t *buf, uint16_t buf_len)
 	}
 
 	/* Request more data */
-	if (buf_len < header_len || buf_len - header_len < payload_len) {
+	if (buf_len < header_len + payload_len) {
 		return 0;
 	}
 
 	return (int32_t)header_len + payload_len;
 }
 
-static bool uc_ready(void)
+static bool uc_ready(int fd)
 {
-	struct pollfd pollfd = { .fd = uc_fd, .events = POLLIN };
+	struct pollfd pollfd = { .fd = fd, .events = POLLIN };
 
 	return (poll(&pollfd, 1, 0) == 1);
 }
 
 static void rx_thread(void *p1, void *p2, void *p3)
 {
-	ARG_UNUSED(p1);
+	const struct device *dev = p1;
+	struct uc_data *uc = dev->data;
+
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
 	LOG_DBG("started");
 
-	uint16_t frame_size = 0;
+	ssize_t frame_size = 0;
 
 	while (1) {
 		static uint8_t frame[512];
@@ -183,14 +206,14 @@ static void rx_thread(void *p1, void *p2, void *p3)
 		ssize_t len;
 		const uint8_t *frame_start = frame;
 
-		if (!uc_ready()) {
+		if (!uc_ready(uc->fd)) {
 			k_sleep(K_MSEC(1));
 			continue;
 		}
 
 		LOG_DBG("calling read()");
 
-		len = read(uc_fd, frame + frame_size, sizeof(frame) - frame_size);
+		len = read(uc->fd, frame + frame_size, sizeof(frame) - frame_size);
 		if (len < 0) {
 			if (errno == EINTR) {
 				k_yield();
@@ -198,8 +221,8 @@ static void rx_thread(void *p1, void *p2, void *p3)
 			}
 
 			LOG_ERR("Reading socket failed, errno %d", errno);
-			close(uc_fd);
-			uc_fd = -1;
+			close(uc->fd);
+			uc->fd = -1;
 			return;
 		}
 
@@ -256,18 +279,20 @@ static void rx_thread(void *p1, void *p2, void *p3)
 
 			LOG_DBG("Calling bt_recv(%p)", buf);
 
-			bt_recv(buf);
+			uc->recv(dev, buf);
 		}
 
 		k_yield();
 	}
 }
 
-static int uc_send(struct net_buf *buf)
+static int uc_send(const struct device *dev, struct net_buf *buf)
 {
+	struct uc_data *uc = dev->data;
+
 	LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf), buf->len);
 
-	if (uc_fd < 0) {
+	if (uc->fd < 0) {
 		LOG_ERR("User channel not open");
 		return -EIO;
 	}
@@ -290,7 +315,7 @@ static int uc_send(struct net_buf *buf)
 		return -EINVAL;
 	}
 
-	if (write(uc_fd, buf->data, buf->len) < 0) {
+	if (write(uc->fd, buf->data, buf->len) < 0) {
 		return -errno;
 	}
 
@@ -350,25 +375,28 @@ static int user_chan_open(void)
 	return fd;
 }
 
-static int uc_open(void)
+static int uc_open(const struct device *dev, bt_hci_recv_t recv)
 {
+	struct uc_data *uc = dev->data;
+
 	if (hci_socket) {
 		LOG_DBG("hci%d", bt_dev_index);
 	} else {
 		LOG_DBG("hci %s:%d", ip_addr, port);
 	}
 
-
-	uc_fd = user_chan_open();
-	if (uc_fd < 0) {
-		return uc_fd;
+	uc->fd = user_chan_open();
+	if (uc->fd < 0) {
+		return uc->fd;
 	}
 
-	LOG_DBG("User Channel opened as fd %d", uc_fd);
+	uc->recv = recv;
+
+	LOG_DBG("User Channel opened as fd %d", uc->fd);
 
 	k_thread_create(&rx_thread_data, rx_thread_stack,
 			K_KERNEL_STACK_SIZEOF(rx_thread_stack),
-			rx_thread, NULL, NULL, NULL,
+			rx_thread, (void *)dev, NULL, NULL,
 			K_PRIO_COOP(CONFIG_BT_DRIVER_RX_HIGH_PRIO),
 			0, K_NO_WAIT);
 
@@ -377,22 +405,31 @@ static int uc_open(void)
 	return 0;
 }
 
-static const struct bt_hci_driver drv = {
-	.name		= "HCI User Channel",
-	.bus		= BT_HCI_DRIVER_BUS_UART,
-	.open		= uc_open,
-	.send		= uc_send,
+static DEVICE_API(bt_hci, uc_drv_api) = {
+	.open = uc_open,
+	.send = uc_send,
 };
 
-static int bt_uc_init(void)
+static int uc_init(const struct device *dev)
 {
-
-	bt_hci_driver_register(&drv);
+	if (!arg_found) {
+		posix_print_warning("Warning: Bluetooth device missing.\n"
+				    "Specify either a local hci interface --bt-dev=hciN\n"
+				    "or a valid hci tcp server --bt-dev=ip_address:port\n");
+		return -ENODEV;
+	}
 
 	return 0;
 }
 
-SYS_INIT(bt_uc_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
+#define UC_DEVICE_INIT(inst) \
+	static struct uc_data uc_data_##inst = { \
+		.fd = -1, \
+	}; \
+	DEVICE_DT_INST_DEFINE(inst, uc_init, NULL, &uc_data_##inst, NULL, \
+			      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &uc_drv_api)
+
+DT_INST_FOREACH_STATUS_OKAY(UC_DEVICE_INIT)
 
 static void cmd_bt_dev_found(char *argv, int offset)
 {
@@ -446,14 +483,4 @@ static void add_btuserchan_arg(void)
 	native_add_command_line_opts(btuserchan_args);
 }
 
-static void btuserchan_check_arg(void)
-{
-	if (!arg_found) {
-		posix_print_error_and_exit("Error: Bluetooth device missing.\n"
-					   "Specify either a local hci interface --bt-dev=hciN\n"
-					   "or a valid hci tcp server --bt-dev=ip_address:port\n");
-	}
-}
-
 NATIVE_TASK(add_btuserchan_arg, PRE_BOOT_1, 10);
-NATIVE_TASK(btuserchan_check_arg, PRE_BOOT_2, 10);

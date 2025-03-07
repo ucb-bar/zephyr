@@ -205,7 +205,7 @@ static int quectel_lcx6g_resume(const struct device *dev)
 
 	quectel_lcx6g_await_pm_ready(dev);
 
-	ret = modem_pipe_open(data->uart_pipe);
+	ret = modem_pipe_open(data->uart_pipe, K_SECONDS(10));
 	if (ret < 0) {
 		LOG_ERR("Failed to open pipe");
 		return ret;
@@ -214,21 +214,21 @@ static int quectel_lcx6g_resume(const struct device *dev)
 	ret = modem_chat_attach(&data->chat, data->uart_pipe);
 	if (ret < 0) {
 		LOG_ERR("Failed to attach chat");
-		modem_pipe_close(data->uart_pipe);
+		modem_pipe_close(data->uart_pipe, K_SECONDS(10));
 		return ret;
 	}
 
 	ret = modem_chat_run_script(&data->chat, &resume_script);
 	if (ret < 0) {
 		LOG_ERR("Failed to initialize GNSS");
-		modem_pipe_close(data->uart_pipe);
+		modem_pipe_close(data->uart_pipe, K_SECONDS(10));
 		return ret;
 	}
 
 	ret = quectel_lcx6g_configure_pps(dev);
 	if (ret < 0) {
 		LOG_ERR("Failed to configure PPS");
-		modem_pipe_close(data->uart_pipe);
+		modem_pipe_close(data->uart_pipe, K_SECONDS(10));
 		return ret;
 	}
 
@@ -253,7 +253,7 @@ static int quectel_lcx6g_suspend(const struct device *dev)
 		LOG_INF("Suspended");
 	}
 
-	modem_pipe_close(data->uart_pipe);
+	modem_pipe_close(data->uart_pipe, K_SECONDS(10));
 	return ret;
 }
 
@@ -268,7 +268,7 @@ static int quectel_lcx6g_turn_off(const struct device *dev)
 
 	LOG_INF("Powered off");
 
-	return modem_pipe_close(data->uart_pipe);
+	return modem_pipe_close(data->uart_pipe, K_SECONDS(10));
 }
 
 static int quectel_lcx6g_pm_action(const struct device *dev, enum pm_device_action action)
@@ -717,7 +717,7 @@ static int quectel_lcx6g_get_supported_systems(const struct device *dev, gnss_sy
 	return 0;
 }
 
-static struct gnss_driver_api gnss_api = {
+static DEVICE_API(gnss, gnss_api) = {
 	.set_fix_rate = quectel_lcx6g_set_fix_rate,
 	.get_fix_rate = quectel_lcx6g_get_fix_rate,
 	.set_navigation_mode = quectel_lcx6g_set_navigation_mode,
@@ -837,7 +837,7 @@ static int quectel_lcx6g_init(const struct device *dev)
 	_CONCAT(_CONCAT(_CONCAT(name, _), DT_DRV_COMPAT), inst)
 
 #define LCX6G_DEVICE(inst)								\
-	static struct quectel_lcx6g_config LCX6G_INST_NAME(inst, config) = {		\
+	static const struct quectel_lcx6g_config LCX6G_INST_NAME(inst, config) = {	\
 		.uart = DEVICE_DT_GET(DT_INST_BUS(inst)),				\
 		.pps_mode = DT_INST_STRING_UPPER_TOKEN(inst, pps_mode),			\
 		.pps_pulse_width = DT_INST_PROP(inst, pps_pulse_width),			\

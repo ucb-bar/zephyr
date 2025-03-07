@@ -52,19 +52,8 @@
 #define ROM_SIZE (CONFIG_FLASH_SIZE * 1024 - CONFIG_FLASH_LOAD_OFFSET - ROM_END_OFFSET)
 #endif
 
-#if defined(CONFIG_XIP)
-#if defined(CONFIG_IS_BOOTLOADER)
-#define RAM_SIZE (CONFIG_BOOTLOADER_SRAM_SIZE * 1K)
-#define RAM_ADDR (CONFIG_SRAM_BASE_ADDRESS + \
-	(CONFIG_SRAM_SIZE * 1K - RAM_SIZE))
-#else
 #define RAM_SIZE (CONFIG_SRAM_SIZE * 1K)
 #define RAM_ADDR CONFIG_SRAM_BASE_ADDRESS
-#endif
-#else
-#define RAM_SIZE (CONFIG_SRAM_SIZE * 1K - CONFIG_BOOTLOADER_SRAM_SIZE * 1K)
-#define RAM_ADDR CONFIG_SRAM_BASE_ADDRESS
-#endif
 
 #if defined(CONFIG_CUSTOM_SECTION_ALIGN)
 _region_min_align = CONFIG_CUSTOM_SECTION_MIN_ALIGN_SIZE;
@@ -174,7 +163,7 @@ SECTIONS
 
 	__text_region_end = .;
 
-#if defined (CONFIG_CPP)
+#if defined (CONFIG_CPP) || defined(CONFIG_RUST)
 	SECTION_PROLOGUE(.ARM.extab,,)
 	{
 	/*
@@ -202,6 +191,10 @@ SECTIONS
 	__rodata_region_start = .;
 
 #include <zephyr/linker/common-rom.ld>
+/* Located in generated directory. This file is populated by calling
+ * zephyr_linker_sources(ROM_SECTIONS ...). Useful for grouping iterable RO structs.
+ */
+#include <snippets-rom-sections.ld>
 #include <zephyr/linker/thread-local-storage.ld>
 
     SECTION_PROLOGUE(_RODATA_SECTION_NAME,,)

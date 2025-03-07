@@ -93,6 +93,8 @@ PR Requirements
 - Each commit in the PR must provide a commit message following the
   :ref:`commit-guidelines`.
 
+- The PR description must include a summary of the changes and their rationales.
+
 - All files in the PR must comply with :ref:`Licensing
   Requirements<licensing_requirements>`.
 
@@ -161,7 +163,7 @@ Workflow Suggestions That Help Reviewers
 .. |git range-diff| replace:: ``git range-diff``
 .. _`git range-diff`: https://git-scm.com/docs/git-range-diff
 
-PR Review Escalation
+Getting PRs Reviewed
 ====================
 
 The Zephyr community is a diverse group of individuals, with different levels of
@@ -177,8 +179,8 @@ following this process:
 #. For PRs that have otherwise stalled, the Zephyr Dev Meeting pings the
    Assignee and any reviewers that have left comments on the PR.
 
-Contributors may escalate PRs outside of the Zephyr Dev Meeting triage process
-as follows:
+Contributors may request PRs to be reviewed outside of the Zephyr Dev Meeting
+triage process as follows:
 
 - After 1 week of inactivity, ping the Assignee or reviewers on the PR by adding
   a comment to the PR.
@@ -193,7 +195,7 @@ as follows:
   help on Discord or send an email to the `Zephyr devel mailing list`_.
 
 Note that for new PRs, contributors should generally wait for at least one
-Zephyr Dev Meeting before escalating the PR themselves.
+Zephyr Dev Meeting before making a request themselves.
 
 .. _Zephyr devel mailing list: https://lists.zephyrproject.org/g/devel
 
@@ -252,7 +254,7 @@ the steps below:
 
 .. _dev-review: https://github.com/zephyrproject-rtos/zephyr/labels/dev-review
 
-.. _Zephyr Dev Meeting: https://github.com/zephyrproject-rtos/zephyr/wiki/Zephyr-Committee-and-Working-Group-Meetings#zephyr-dev-meeting
+.. _Zephyr Dev Meeting: https://github.com/zephyrproject-rtos/zephyr/wiki/Zephyr-Committee-and-Working-Groups#zephyr-dev-meeting
 
 .. _Architecture Project: https://github.com/zephyrproject-rtos/zephyr/projects/18
 

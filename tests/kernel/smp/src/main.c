@@ -318,8 +318,9 @@ ZTEST(smp, test_coop_switch_in_abort)
 	unsigned int num_threads = arch_num_cpus();
 	unsigned int i;
 
-	zassert_true(_current->base.prio < 0, "test case relies on ztest thread be cooperative");
-	zassert_true(_current->base.prio > SPAWN_AB_PRIO,
+	zassert_true(arch_current_thread()->base.prio < 0,
+		     "test case relies on ztest thread be cooperative");
+	zassert_true(arch_current_thread()->base.prio > SPAWN_AB_PRIO,
 		     "spawn test need to have higher priority than ztest thread");
 
 	/* Spawn N number of cooperative threads, where N = number of CPUs */
@@ -802,7 +803,7 @@ ZTEST(smp, test_fatal_on_smp)
 				      K_PRIO_PREEMPT(2), 0, K_NO_WAIT);
 
 	/* hold cpu and wait for thread trigger exception and being terminated */
-	k_busy_wait(2 * DELAY_US);
+	k_busy_wait(5 * DELAY_US);
 
 	/* Verify that child thread is no longer running. We can't simply use k_thread_join here
 	 * as we don't want to introduce reschedule point here.
@@ -869,15 +870,15 @@ static void t2_mutex_lock(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	zassert_equal(_current->base.global_lock_count, 0,
+	zassert_equal(arch_current_thread()->base.global_lock_count, 0,
 			"thread global lock cnt %d is incorrect",
-			_current->base.global_lock_count);
+			arch_current_thread()->base.global_lock_count);
 
 	k_mutex_lock((struct k_mutex *)p1, K_FOREVER);
 
-	zassert_equal(_current->base.global_lock_count, 0,
+	zassert_equal(arch_current_thread()->base.global_lock_count, 0,
 			"thread global lock cnt %d is incorrect",
-			_current->base.global_lock_count);
+			arch_current_thread()->base.global_lock_count);
 
 	k_mutex_unlock((struct k_mutex *)p1);
 
@@ -885,9 +886,9 @@ static void t2_mutex_lock(void *p1, void *p2, void *p3)
 	 * context switch but global_lock_cnt has not been decrease
 	 * because no irq_lock() was called.
 	 */
-	zassert_equal(_current->base.global_lock_count, 0,
+	zassert_equal(arch_current_thread()->base.global_lock_count, 0,
 			"thread global lock cnt %d is incorrect",
-			_current->base.global_lock_count);
+			arch_current_thread()->base.global_lock_count);
 }
 
 /**

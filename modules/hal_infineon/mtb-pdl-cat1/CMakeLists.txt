@@ -23,6 +23,8 @@ zephyr_include_directories_ifdef(CONFIG_SOC_FAMILY_INFINEON_CAT1A ${pdl_dev_cat1
 zephyr_include_directories_ifdef(CONFIG_SOC_FAMILY_INFINEON_CAT1A ${pdl_dev_cat1a_dir}/include/ip)
 zephyr_library_sources_ifdef(CONFIG_SOC_FAMILY_INFINEON_CAT1A ${pdl_dev_cat1a_dir}/source/cy_device.c)
 
+
+zephyr_include_directories(${pdl_drv_dir}/include)
 zephyr_include_directories_ifdef(CONFIG_SOC_FAMILY_INFINEON_CAT1B ${pdl_dev_cat1b_dir}/include)
 zephyr_include_directories_ifdef(CONFIG_SOC_FAMILY_INFINEON_CAT1B ${pdl_dev_cat1b_dir}/include/ip)
 zephyr_library_sources_ifdef(CONFIG_SOC_FAMILY_INFINEON_CAT1B ${pdl_dev_cat1b_dir}/source/cy_device.c)
@@ -43,6 +45,12 @@ zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_UART     ${pdl_drv_dir}/source/
 zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_FLASH    ${pdl_drv_dir}/source/cy_flash.c)
 zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_WDT      ${pdl_drv_dir}/source/cy_wdt.c)
 
+if(CONFIG_SOC_FAMILY_INFINEON_CAT1B)
+  zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_ADC      ${pdl_drv_dir}/source/cy_adcmic.c)
+else()
+  zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_ADC      ${pdl_drv_dir}/source/cy_sar.c)
+endif()
+
 if(CONFIG_USE_INFINEON_TRNG)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_crypto.c)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_crypto_core_trng_v1.c)
@@ -53,9 +61,19 @@ if(CONFIG_USE_INFINEON_UART OR CONFIG_USE_INFINEON_I2C OR CONFIG_USE_INFINEON_SP
   zephyr_library_sources(${pdl_drv_dir}/source/cy_scb_common.c)
 endif()
 
-if(CONFIG_USE_INFINEON_ADC)
+if(CONFIG_USE_INFINEON_ADC OR CONFIG_USE_INFINEON_SMIF)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_dma.c)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_dmac.c)
+endif()
+
+zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_SMIF ${pdl_drv_dir}/source/cy_smif.c)
+zephyr_code_relocate(FILES ${pdl_drv_dir}/source/cy_smif.c LOCATION RAM)
+zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_SMIF ${pdl_drv_dir}/source/cy_smif_sfdp.c)
+zephyr_code_relocate(FILES ${pdl_drv_dir}/source/cy_smif_sfdp.c LOCATION RAM)
+zephyr_library_sources_ifdef(CONFIG_USE_INFINEON_SMIF ${pdl_drv_dir}/source/cy_smif_memslot.c)
+zephyr_code_relocate(FILES ${pdl_drv_dir}/source/cy_smif_memslot.c LOCATION RAM)
+
+if(CONFIG_USE_INFINEON_ADC)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_sysanalog.c)
 endif()
 
@@ -70,10 +88,17 @@ zephyr_library_sources(${pdl_drv_dir}/source/cy_sysclk.c)
 if(CONFIG_SOC_FAMILY_INFINEON_CAT1B)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_sysclk_v2.c)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_systick_v2.c)
+  zephyr_library_sources(${pdl_drv_dir}/source/cy_syspm_v2.c)
   zephyr_library_sources(${pdl_drv_dir}/source/cy_syspm_btss.c)
+  zephyr_library_sources(${pdl_drv_dir}/source/cy_syspm_ppu.c)
+  zephyr_library_sources(${pdl_drv_dir}/source/ppu_v1.c)
 endif()
 zephyr_library_sources(${pdl_drv_dir}/source/cy_syslib.c)
 zephyr_library_sources(${pdl_drv_dir}/source/cy_syspm.c)
 zephyr_library_sources(${pdl_drv_dir}/source/cy_systick.c)
 zephyr_library_sources(${pdl_drv_dir}/source/cy_trigmux.c)
 zephyr_library_sources(${pdl_drv_dir}/source/cy_wdt.c)
+
+# add IPC_BT driver for CYW208XX devices
+zephyr_library_sources_ifdef(CONFIG_BT_CYW208XX  ${pdl_drv_dir}/source/cy_ipc_bt.c)
+zephyr_library_sources_ifdef(CONFIG_BT_CYW208XX  ${pdl_drv_dir}/source/cy_syspm_pdcm.c)

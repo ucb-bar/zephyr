@@ -13,7 +13,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/arch/cpu.h>
 #include <zephyr/drivers/uart.h>
+
+#ifdef CONFIG_PINCTRL
 #include <zephyr/drivers/pinctrl.h>
+#endif
+
 #include <soc.h>
 #include <zephyr/irq.h>
 
@@ -132,8 +136,9 @@ static int uart_sifive_fifo_fill(const struct device *dev,
 	volatile struct uart_sifive_regs_t *uart = DEV_UART(dev);
 	int i;
 
-	for (i = 0; i < size && !(uart->tx & TXDATA_FULL); i++)
+	for (i = 0; i < size && !(uart->tx & TXDATA_FULL); i++) {
 		uart->tx = (int)tx_data[i];
+	}
 
 	return i;
 }
@@ -158,8 +163,9 @@ static int uart_sifive_fifo_read(const struct device *dev,
 	for (i = 0; i < size; i++) {
 		val = uart->rx;
 
-		if (val & RXDATA_EMPTY)
+		if (val & RXDATA_EMPTY) {
 			break;
+		}
 
 		rx_data[i] = (uint8_t)(val & RXDATA_MASK);
 	}
@@ -311,8 +317,9 @@ static void uart_sifive_irq_handler(const struct device *dev)
 {
 	struct uart_sifive_data *data = dev->data;
 
-	if (data->callback)
+	if (data->callback) {
 		data->callback(dev, data->cb_data);
+	}
 }
 
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
@@ -351,7 +358,7 @@ static int uart_sifive_init(const struct device *dev)
 	return 0;
 }
 
-static const struct uart_driver_api uart_sifive_driver_api = {
+static DEVICE_API(uart, uart_sifive_driver_api) = {
 	.poll_in          = uart_sifive_poll_in,
 	.poll_out         = uart_sifive_poll_out,
 	.err_check        = NULL,
@@ -381,7 +388,9 @@ static struct uart_sifive_data uart_sifive_data_0;
 static void uart_sifive_irq_cfg_func_0(void);
 #endif
 
+#ifdef CONFIG_PINCTRL
 PINCTRL_DT_INST_DEFINE(0);
+#endif
 
 static const struct uart_sifive_device_config uart_sifive_dev_cfg_0 = {
 	.port         = DT_INST_REG_ADDR(0),
@@ -389,7 +398,9 @@ static const struct uart_sifive_device_config uart_sifive_dev_cfg_0 = {
 	.baud_rate    = DT_INST_PROP(0, current_speed),
 	.rxcnt_irq    = CONFIG_UART_SIFIVE_PORT_0_RXCNT_IRQ,
 	.txcnt_irq    = CONFIG_UART_SIFIVE_PORT_0_TXCNT_IRQ,
+#ifdef CONFIG_PINCTRL
 	.pcfg	      = PINCTRL_DT_INST_DEV_CONFIG_GET(0),
+#endif
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	.cfg_func     = uart_sifive_irq_cfg_func_0,
 #endif

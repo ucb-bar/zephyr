@@ -22,7 +22,7 @@
 #include "media_proxy_internal.h"
 #include "mcs_internal.h"
 
-LOG_MODULE_REGISTER(media_proxy, CONFIG_MCTL_LOG_LEVEL);
+LOG_MODULE_REGISTER(bt_media_proxy, CONFIG_MCTL_LOG_LEVEL);
 
 /* Media player */
 struct media_player {
@@ -241,7 +241,7 @@ static void mcc_discover_mcs_cb(struct bt_conn *conn, int err)
 		LOG_ERR("Discovery failed (%d)", err);
 	}
 
-	LOG_DBG("Disovered player");
+	LOG_DBG("Discovered player");
 
 	if (mprx.ctrlr.cbs && mprx.ctrlr.cbs->discover_player) {
 		mprx.ctrlr.cbs->discover_player(&mprx.remote_player, err);

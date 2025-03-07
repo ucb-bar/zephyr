@@ -46,7 +46,8 @@ void k_free(void *ptr)
 
 	if (ptr != NULL) {
 		heap_ref = ptr;
-		ptr = --heap_ref;
+		--heap_ref;
+		ptr = heap_ref;
 
 		SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_heap_sys, k_free, *heap_ref, heap_ref);
 
@@ -164,7 +165,7 @@ void *z_thread_aligned_alloc(size_t align, size_t size)
 	if (k_is_in_isr()) {
 		heap = _SYSTEM_HEAP;
 	} else {
-		heap = _current->resource_pool;
+		heap = arch_current_thread()->resource_pool;
 	}
 
 	if (heap != NULL) {

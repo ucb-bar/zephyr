@@ -201,7 +201,7 @@ static int __z_clock_nanosleep(clockid_t clock_id, int flags, const struct times
 	k_spinlock_key_t key;
 	const bool update_rmtp = rmtp != NULL;
 
-	if (!(clock_id == CLOCK_REALTIME || clock_id == CLOCK_MONOTONIC)) {
+	if (!((clock_id == CLOCK_REALTIME) || (clock_id == CLOCK_MONOTONIC))) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -211,21 +211,19 @@ static int __z_clock_nanosleep(clockid_t clock_id, int flags, const struct times
 		return -1;
 	}
 
-	if (rqtp->tv_sec < 0 || rqtp->tv_nsec < 0 || rqtp->tv_nsec >= NSEC_PER_SEC) {
+	if ((rqtp->tv_sec < 0) || (rqtp->tv_nsec < 0) || (rqtp->tv_nsec >= NSEC_PER_SEC)) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	if ((flags & TIMER_ABSTIME) == 0 &&
-	    unlikely(rqtp->tv_sec >= ULLONG_MAX / NSEC_PER_SEC)) {
-
-		ns = rqtp->tv_nsec + NSEC_PER_SEC
-			+ k_sleep(K_SECONDS(rqtp->tv_sec - 1)) * NSEC_PER_MSEC;
+	if ((flags & TIMER_ABSTIME) == 0 && unlikely(rqtp->tv_sec >= ULLONG_MAX / NSEC_PER_SEC)) {
+		ns = rqtp->tv_nsec + NSEC_PER_SEC +
+		     (uint64_t)k_sleep(K_SECONDS(rqtp->tv_sec - 1)) * NSEC_PER_MSEC;
 	} else {
-		ns = rqtp->tv_sec * NSEC_PER_SEC + rqtp->tv_nsec;
+		ns = (uint64_t)rqtp->tv_sec * NSEC_PER_SEC + rqtp->tv_nsec;
 	}
 
-	uptime_ns = k_cyc_to_ns_ceil64(k_cycle_get_32());
+	uptime_ns = k_ticks_to_ns_ceil64(sys_clock_tick_get());
 
 	if (flags & TIMER_ABSTIME && clock_id == CLOCK_REALTIME) {
 		key = k_spin_lock(&rt_clock_base_lock);

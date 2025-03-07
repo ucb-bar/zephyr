@@ -492,12 +492,16 @@ static int ifx_cat1_i2c_target_unregister(const struct device *dev, struct i2c_t
 }
 
 /* I2C API structure */
-static const struct i2c_driver_api i2c_cat1_driver_api = {
+static DEVICE_API(i2c, i2c_cat1_driver_api) = {
 	.configure = ifx_cat1_i2c_configure,
 	.transfer = ifx_cat1_i2c_transfer,
 	.get_config = ifx_cat1_i2c_get_config,
 	.target_register = ifx_cat1_i2c_target_register,
-	.target_unregister = ifx_cat1_i2c_target_unregister};
+	.target_unregister = ifx_cat1_i2c_target_unregister,
+#ifdef CONFIG_I2C_RTIO
+	.iodev_submit = i2c_iodev_submit_fallback,
+#endif
+};
 
 /* Macros for I2C instance declaration */
 #define INFINEON_CAT1_I2C_INIT(n)                                                                  \

@@ -15,7 +15,7 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/atomic.h>
 
-#include <zephyr/drivers/bluetooth/hci_driver.h>
+#include <zephyr/drivers/bluetooth.h>
 
 #include <zephyr/bluetooth/hci_types.h>
 #include <zephyr/bluetooth/hci_vs.h>
@@ -68,6 +68,7 @@
 #include "ll_sw/ull_sync_internal.h"
 #include "ll_sw/ull_conn_internal.h"
 #include "ll_sw/ull_sync_iso_internal.h"
+#include "ll_sw/ull_iso_internal.h"
 #include "ll_sw/ull_df_internal.h"
 
 #include "ll.h"
@@ -1035,9 +1036,22 @@ static void read_supported_commands(struct net_buf *buf, struct net_buf **evt)
 
 #endif /* CONFIG_BT_CTLR_DF */
 
-#if defined(CONFIG_BT_HCI_RAW) && defined(CONFIG_BT_TINYCRYPT_ECC)
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_SENDER)
+	/* LE Periodic Advertising Sync Transfer */
+	rp->commands[40] |= BIT(6);
+	/* LE Periodic Advertising Set Info Transfer */
+	rp->commands[40] |= BIT(7);
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_SENDER */
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER)
+	/* LE Set Periodic Advertising Sync Transfer Parameters */
+	rp->commands[41] |= BIT(0);
+	/* LE Set Default Periodic Advertising Sync Transfer Parameters */
+	rp->commands[41] |= BIT(1);
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER */
+
+#if defined(CONFIG_BT_HCI_RAW) && defined(CONFIG_BT_SEND_ECC_EMULATION)
 	bt_hci_ecc_supported_commands(rp->commands);
-#endif /* CONFIG_BT_HCI_RAW && CONFIG_BT_TINYCRYPT_ECC */
+#endif /* CONFIG_BT_HCI_RAW && CONFIG_BT_SEND_ECC_EMULATION */
 
 	/* LE Read TX Power. */
 	rp->commands[38] |= BIT(7);
@@ -3130,7 +3144,7 @@ static void le_df_connection_iq_report(struct node_rx_pdu *node_rx, struct net_b
 #endif /* CONFIG_BT_CTLR_PHY */
 
 	/* TX LL thread has higher priority than RX thread. It may happen that host succefully
-	 * disables CTE sampling in the meantime. It should be verified here, to avoid reporing
+	 * disables CTE sampling in the meantime. It should be verified here, to avoid reporting
 	 * IQ samples after the functionality was disabled.
 	 */
 	if (ull_df_conn_cfg_is_not_enabled(&lll->df_rx_cfg)) {
@@ -4080,6 +4094,110 @@ static void le_read_pal_size(struct net_buf *buf, struct net_buf **evt)
 #endif /* CONFIG_BT_CTLR_SYNC_PERIODIC */
 #endif /* CONFIG_BT_OBSERVER */
 
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_SENDER)
+static void le_per_adv_sync_transfer(struct net_buf *buf, struct net_buf **evt)
+{
+	struct bt_hci_cp_le_per_adv_sync_transfer *cmd = (void *)buf->data;
+	struct bt_hci_rp_le_per_adv_sync_transfer *rp;
+	uint16_t conn_handle, conn_handle_le16;
+	uint16_t service_data;
+	uint16_t sync_handle;
+	uint8_t status;
+
+	conn_handle_le16 = cmd->conn_handle;
+
+	conn_handle = sys_le16_to_cpu(cmd->conn_handle);
+	service_data = sys_le16_to_cpu(cmd->service_data);
+	sync_handle = sys_le16_to_cpu(cmd->sync_handle);
+
+	status = ll_sync_transfer(conn_handle, service_data, sync_handle);
+
+	rp = hci_cmd_complete(evt, sizeof(*rp));
+	rp->conn_handle = conn_handle_le16;
+	rp->status = status;
+}
+
+static void le_per_adv_set_info_transfer(struct net_buf *buf, struct net_buf **evt)
+{
+	struct bt_hci_cp_le_per_adv_set_info_transfer *cmd = (void *)buf->data;
+	struct bt_hci_rp_le_per_adv_set_info_transfer *rp;
+	uint16_t conn_handle, conn_handle_le16;
+	uint16_t service_data;
+	uint8_t adv_handle;
+	uint8_t status;
+
+	conn_handle_le16 = cmd->conn_handle;
+
+	conn_handle = sys_le16_to_cpu(cmd->conn_handle);
+	service_data = sys_le16_to_cpu(cmd->service_data);
+	adv_handle = cmd->adv_handle;
+
+	status = ll_adv_sync_set_info_transfer(conn_handle, service_data, adv_handle);
+
+	rp = hci_cmd_complete(evt, sizeof(*rp));
+	rp->conn_handle = conn_handle_le16;
+	rp->status = status;
+}
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_SENDER */
+
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER)
+static void le_past_param(struct net_buf *buf, struct net_buf **evt)
+{
+	struct bt_hci_cp_le_past_param *cmd = (void *)buf->data;
+	struct bt_hci_rp_le_past_param *rp;
+	uint16_t conn_handle_le16;
+	uint16_t conn_handle;
+	uint16_t timeout;
+	uint8_t cte_type;
+	uint8_t status;
+	uint16_t skip;
+	uint8_t mode;
+
+	if (adv_cmds_ext_check(evt)) {
+		return;
+	}
+
+	conn_handle_le16 = cmd->conn_handle;
+
+	conn_handle = sys_le16_to_cpu(cmd->conn_handle);
+	mode = cmd->mode;
+	skip = sys_le16_to_cpu(cmd->skip);
+	timeout = sys_le16_to_cpu(cmd->timeout);
+	cte_type = cmd->cte_type;
+
+	status = ll_past_param(conn_handle, mode, skip, timeout, cte_type);
+
+	rp = hci_cmd_complete(evt, sizeof(*rp));
+	rp->conn_handle = conn_handle_le16;
+	rp->status = status;
+}
+
+static void le_default_past_param(struct net_buf *buf, struct net_buf **evt)
+{
+	struct bt_hci_cp_le_default_past_param *cmd = (void *)buf->data;
+	struct bt_hci_rp_le_default_past_param *rp;
+	uint16_t timeout;
+	uint8_t cte_type;
+	uint8_t status;
+	uint16_t skip;
+	uint8_t mode;
+
+	if (adv_cmds_ext_check(evt)) {
+		return;
+	}
+
+	mode = cmd->mode;
+	skip = sys_le16_to_cpu(cmd->skip);
+	timeout = sys_le16_to_cpu(cmd->timeout);
+	cte_type = cmd->cte_type;
+
+	status = ll_default_past_param(mode, skip, timeout, cte_type);
+
+	rp = hci_cmd_complete(evt, sizeof(*rp));
+	rp->status = status;
+}
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER */
+
 #if defined(CONFIG_BT_CENTRAL)
 static void le_ext_create_connection(struct net_buf *buf, struct net_buf **evt)
 {
@@ -4295,6 +4413,51 @@ static void le_cis_established(struct pdu_data *pdu_data,
 #endif /* CONFIG_BT_CTLR_CENTRAL_ISO */
 }
 #endif /* CONFIG_BT_CTLR_CONN_ISO */
+
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER)
+static void le_per_adv_sync_transfer_received(struct pdu_data *pdu_data_rx,
+					      struct node_rx_pdu *node_rx, struct net_buf *buf)
+{
+	struct bt_hci_evt_le_past_received *sep;
+	struct node_rx_past_received *se;
+	struct ll_sync_set *sync;
+	void *node;
+
+	if (!(event_mask & BT_EVT_MASK_LE_META_EVENT) ||
+	    !(le_event_mask & BT_EVT_MASK_LE_PAST_RECEIVED)) {
+		return;
+	}
+
+	sep = meta_evt(buf, BT_HCI_EVT_LE_PAST_RECEIVED, sizeof(*sep));
+
+	/* Check for pdu field being aligned before accessing PAST received
+	 * event.
+	 */
+	node = pdu_data_rx;
+	LL_ASSERT(IS_PTR_ALIGNED(node, struct node_rx_past_received));
+
+	se = node;
+	sep->status = se->rx_sync.status;
+
+	sync = node_rx->rx_ftr.param;
+
+	/* Resolved address, if private, has been populated in ULL */
+	sep->addr.type = sync->peer_id_addr_type;
+	if (sync->peer_addr_resolved) {
+		/* Mark it as identity address from RPA (0x02, 0x03) */
+		MARK_AS_IDENTITY_ADDR(sep->addr.type);
+	}
+	(void)memcpy(sep->addr.a.val, sync->peer_id_addr, BDADDR_SIZE);
+
+	sep->adv_sid = sync->sid;
+	sep->phy = find_lsb_set(se->rx_sync.phy);
+	sep->interval = sys_cpu_to_le16(se->rx_sync.interval);
+	sep->clock_accuracy = se->rx_sync.sca;
+	sep->conn_handle = sys_cpu_to_le16(se->conn_handle);
+	sep->service_data = sys_cpu_to_le16(se->service_data);
+	sep->sync_handle = sys_cpu_to_le16(node_rx->hdr.handle);
+}
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER */
 
 static int controller_cmd_handle(uint16_t  ocf, struct net_buf *cmd,
 				 struct net_buf **evt, void **node_rx)
@@ -4669,6 +4832,26 @@ static int controller_cmd_handle(uint16_t  ocf, struct net_buf *cmd,
 #endif /* CONFIG_BT_CTLR_SYNC_PERIODIC_ADV_LIST */
 #endif /* CONFIG_BT_CTLR_SYNC_PERIODIC */
 #endif /* CONFIG_BT_OBSERVER */
+
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_SENDER)
+	case BT_OCF(BT_HCI_OP_LE_PER_ADV_SYNC_TRANSFER):
+		le_per_adv_sync_transfer(cmd, evt);
+		break;
+
+	case BT_OCF(BT_HCI_OP_LE_PER_ADV_SET_INFO_TRANSFER):
+		le_per_adv_set_info_transfer(cmd, evt);
+		break;
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_SENDER */
+
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER)
+	case BT_OCF(BT_HCI_OP_LE_PAST_PARAM):
+		le_past_param(cmd, evt);
+		break;
+
+	case BT_OCF(BT_HCI_OP_LE_DEFAULT_PAST_PARAM):
+		le_default_past_param(cmd, evt);
+		break;
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER */
 
 #if defined(CONFIG_BT_CONN)
 #if defined(CONFIG_BT_CENTRAL)
@@ -5256,7 +5439,7 @@ static void vs_le_df_connection_iq_report(struct node_rx_pdu *node_rx, struct ne
 #endif /* CONFIG_BT_CTLR_PHY */
 
 	/* TX LL thread has higher priority than RX thread. It may happen that host succefully
-	 * disables CTE sampling in the meantime. It should be verified here, to avoid reporing
+	 * disables CTE sampling in the meantime. It should be verified here, to avoid reporting
 	 * IQ samples after the functionality was disabled.
 	 */
 	if (ull_df_conn_cfg_is_not_enabled(&lll->df_rx_cfg)) {
@@ -5767,7 +5950,7 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 		sdu_frag_tx.iso_sdu_length = 0;
 	}
 
-	/* Packet boudary flags should be bitwise identical to the SDU state
+	/* Packet boundary flags should be bitwise identical to the SDU state
 	 * 0b00 BT_ISO_START
 	 * 0b01 BT_ISO_CONT
 	 * 0b10 BT_ISO_SINGLE
@@ -5789,6 +5972,7 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 		struct ll_conn_iso_group *cig;
 		struct ll_iso_stream_hdr *hdr;
 		struct ll_iso_datapath *dp_in;
+		uint8_t event_offset;
 
 		cis = ll_iso_stream_connected_get(handle);
 		if (!cis) {
@@ -5797,13 +5981,35 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 
 		cig = cis->group;
 
+		/* We must ensure sufficient time for ISO-AL to fragment SDU and
+		 * deliver PDUs to the TX queue. By checking ull_ref_get, we
+		 * know if we are within the subevents of an ISO event. If so,
+		 * we can assume that we have enough time to deliver in the next
+		 * ISO event. If we're not active within the ISO event, we don't
+		 * know if there is enough time to deliver in the next event,
+		 * and for safety we set the target to current event + 2.
+		 *
+		 * For FT > 1, we have the opportunity to retransmit in later
+		 * event(s), in which case we have the option to target an
+		 * earlier event (this or next) because being late does not
+		 * instantly flush the payload.
+		 */
+
+		event_offset = ull_ref_get(&cig->ull) ? 1 : 2;
+
+		if (cis->lll.tx.ft > 1) {
+			/* FT > 1, target an earlier event */
+			event_offset -= 1;
+		}
+
 #if defined(CONFIG_BT_CTLR_ISOAL_PSN_IGNORE)
 		uint64_t event_count;
 		uint64_t pkt_seq_num;
 
 		/* Catch up local pkt_seq_num with internal pkt_seq_num */
-		event_count = cis->lll.event_count;
+		event_count = cis->lll.event_count + event_offset;
 		pkt_seq_num = event_count + 1U;
+
 		/* If pb_flag is BT_ISO_START (0b00) or BT_ISO_SINGLE (0b10)
 		 * then we simply check that the pb_flag is an even value, and
 		 * then  pkt_seq_num is a future sequence number value compare
@@ -5844,29 +6050,6 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 						   ISO_INT_UNIT_US));
 
 #else /* !CONFIG_BT_CTLR_ISOAL_PSN_IGNORE */
-		uint8_t event_offset;
-
-		/* We must ensure sufficient time for ISO-AL to fragment SDU and
-		 * deliver PDUs to the TX queue. By checking ull_ref_get, we
-		 * know if we are within the subevents of an ISO event. If so,
-		 * we can assume that we have enough time to deliver in the next
-		 * ISO event. If we're not active within the ISO event, we don't
-		 * know if there is enough time to deliver in the next event,
-		 * and for safety we set the target to current event + 2.
-		 *
-		 * For FT > 1, we have the opportunity to retransmit in later
-		 * event(s), in which case we have the option to target an
-		 * earlier event (this or next) because being late does not
-		 * instantly flush the payload.
-		 */
-
-		event_offset = ull_ref_get(&cig->ull) ? 1 : 2;
-
-		if (cis->lll.tx.ft > 1) {
-			/* FT > 1, target an earlier event */
-			event_offset -= 1;
-		}
-
 		sdu_frag_tx.target_event = cis->lll.event_count + event_offset;
 		sdu_frag_tx.grp_ref_point =
 			isoal_get_wrapped_time_us(cig->cig_ref_point,
@@ -5908,7 +6091,10 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 		struct lll_adv_iso_stream *stream;
 		struct ll_adv_iso_set *adv_iso;
 		struct lll_adv_iso *lll_iso;
+		uint16_t latency_prepare;
 		uint16_t stream_handle;
+		uint64_t target_event;
+		uint8_t event_offset;
 
 		/* Get BIS stream handle and stream context */
 		stream_handle = LL_BIS_ADV_IDX_FROM_HANDLE(handle);
@@ -5926,13 +6112,42 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 
 		lll_iso = &adv_iso->lll;
 
+		/* Determine the target event and the first event offset after
+		 * datapath setup.
+		 * event_offset mitigates the possibility of first SDU being
+		 * late on the datapath and avoid all subsequent SDUs being
+		 * dropped for a said SDU interval. i.e. upper layer is not
+		 * drifting, say first SDU dropped, hence subsequent SDUs all
+		 * dropped, is mitigated by offsetting the grp_ref_point.
+		 *
+		 * It is ok to do the below for every received ISO data, ISOAL
+		 * will not consider subsequent skewed target_event after the
+		 * first use of target_event value.
+		 *
+		 * In BIG implementation in LLL, payload_count corresponds to
+		 * the next BIG event, hence calculate grp_ref_point for next
+		 * BIG event by incrementing the previous elapsed big_ref_point
+		 * by one additional ISO interval.
+		 */
+		target_event = lll_iso->payload_count / lll_iso->bn;
+		latency_prepare = lll_iso->latency_prepare;
+		if (latency_prepare) {
+			/* big_ref_point has been updated, but payload_count
+			 * hasn't been updated yet - increment target_event to
+			 * compensate
+			 */
+			target_event += latency_prepare;
+		}
+		event_offset = ull_ref_get(&adv_iso->ull) ? 0U : 1U;
+
 #if defined(CONFIG_BT_CTLR_ISOAL_PSN_IGNORE)
 		uint64_t event_count;
 		uint64_t pkt_seq_num;
 
 		/* Catch up local pkt_seq_num with internal pkt_seq_num */
-		event_count = lll_iso->payload_count / lll_iso->bn;
-		pkt_seq_num = event_count;
+		event_count = target_event + event_offset;
+		pkt_seq_num = event_count + 1U;
+
 		/* If pb_flag is BT_ISO_START (0b00) or BT_ISO_SINGLE (0b10)
 		 * then we simply check that the pb_flag is an even value, and
 		 * then  pkt_seq_num is a future sequence number value compare
@@ -5985,30 +6200,6 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 						   ISO_INT_UNIT_US));
 
 #else /* !CONFIG_BT_CTLR_ISOAL_PSN_IGNORE */
-		uint64_t target_event;
-		uint8_t event_offset;
-
-		/* Determine the target event and the first event offset after
-		 * datapath setup.
-		 * event_offset mitigates the possibility of first SDU being
-		 * late on the datapath and avoid all subsequent SDUs being
-		 * dropped for a said SDU interval. i.e. upper layer is not
-		 * drifting, say first SDU dropped, hence subsequent SDUs all
-		 * dropped, is mitigated by offsetting the grp_ref_point.
-		 *
-		 * It is ok to do the below for every received ISO data, ISOAL
-		 * will not consider subsequent skewed target_event after the
-		 * first use of target_event value.
-		 *
-		 * In BIG implementation in LLL, payload_count corresponds to
-		 * the next BIG event, hence calculate grp_ref_point for next
-		 * BIG event by incrementing the previous elapsed big_ref_point
-		 * by one additional ISO interval.
-		 */
-		target_event = lll_iso->payload_count / lll_iso->bn;
-		event_offset = ull_ref_get(&adv_iso->ull) ? 0U : 1U;
-		event_offset += lll_iso->latency_prepare;
-
 		sdu_frag_tx.target_event = target_event + event_offset;
 		sdu_frag_tx.grp_ref_point =
 			isoal_get_wrapped_time_us(adv_iso->big_ref_point,
@@ -6297,7 +6488,7 @@ static inline void le_dir_adv_report(struct pdu_adv *adv, struct net_buf *buf,
 		ll_rl_id_addr_get(rl_idx, &dir_info->addr.type,
 				  &dir_info->addr.a.val[0]);
 		/* Mark it as identity address from RPA (0x02, 0x03) */
-		dir_info->addr.type += 2U;
+		MARK_AS_IDENTITY_ADDR(dir_info->addr.type);
 	} else {
 #else
 	if (1) {
@@ -6457,7 +6648,7 @@ static void le_advertising_report(struct pdu_data *pdu_data,
 		ll_rl_id_addr_get(rl_idx, &adv_info->addr.type,
 				  &adv_info->addr.a.val[0]);
 		/* Mark it as identity address from RPA (0x02, 0x03) */
-		adv_info->addr.type += 2U;
+		MARK_AS_IDENTITY_ADDR(adv_info->addr.type);
 	} else {
 #else
 	if (1) {
@@ -6562,7 +6753,7 @@ static void le_ext_adv_legacy_report(struct pdu_data *pdu_data,
 		ll_rl_id_addr_get(rl_idx, &adv_info->addr.type,
 				  &adv_info->addr.a.val[0]);
 		/* Mark it as identity address from RPA (0x02, 0x03) */
-		adv_info->addr.type += 2U;
+		MARK_AS_IDENTITY_ADDR(adv_info->addr.type);
 	} else
 #endif /* CONFIG_BT_CTLR_PRIVACY */
 	{
@@ -6754,7 +6945,7 @@ static void ext_adv_info_fill(uint8_t evt_type, uint8_t phy, uint8_t sec_phy,
 		ll_rl_id_addr_get(rl_idx, &adv_info->addr.type,
 				  adv_info->addr.a.val);
 		/* Mark it as identity address from RPA (0x02, 0x03) */
-		adv_info->addr.type += 2U;
+		MARK_AS_IDENTITY_ADDR(adv_info->addr.type);
 #else /* !CONFIG_BT_CTLR_PRIVACY */
 		ARG_UNUSED(rl_idx);
 #endif /* !CONFIG_BT_CTLR_PRIVACY */
@@ -7345,7 +7536,7 @@ no_ext_hdr:
 	/* Clear the data status bits */
 	evt_type &= ~(BIT_MASK(2) << 5);
 
-	/* Allocate, append as buf fragement and construct the scan response
+	/* Allocate, append as buf fragment and construct the scan response
 	 * event.
 	 */
 	evt_buf = bt_buf_get_rx(BT_BUF_EVT, BUF_GET_TIMEOUT);
@@ -7429,7 +7620,7 @@ static void le_per_adv_sync_established(struct pdu_data *pdu_data,
 					struct net_buf *buf)
 {
 	struct bt_hci_evt_le_per_adv_sync_established *sep;
-	struct ll_scan_set *scan;
+	struct ll_sync_set *sync;
 	struct node_rx_sync *se;
 	void *node;
 
@@ -7454,13 +7645,11 @@ static void le_per_adv_sync_established(struct pdu_data *pdu_data,
 		return;
 	}
 
-	scan = node_rx->rx_ftr.param;
+	sync = node_rx->rx_ftr.param;
 
 #if (CONFIG_BT_CTLR_DUP_FILTER_LEN > 0) && \
 	defined(CONFIG_BT_CTLR_SYNC_PERIODIC_ADI_SUPPORT)
-	dup_periodic_adv_reset(scan->periodic.adv_addr_type,
-			       scan->periodic.adv_addr,
-			       scan->periodic.sid);
+	dup_periodic_adv_reset(sync->peer_id_addr_type, sync->peer_id_addr, sync->sid);
 #endif /* CONFIG_BT_CTLR_DUP_FILTER_LEN > 0 &&
 	* CONFIG_BT_CTLR_SYNC_PERIODIC_ADI_SUPPORT
 	*/
@@ -7468,10 +7657,14 @@ static void le_per_adv_sync_established(struct pdu_data *pdu_data,
 	sep->handle = sys_cpu_to_le16(node_rx->hdr.handle);
 
 	/* Resolved address, if private, has been populated in ULL */
-	sep->adv_addr.type = scan->periodic.adv_addr_type;
-	(void)memcpy(sep->adv_addr.a.val, scan->periodic.adv_addr, BDADDR_SIZE);
+	sep->adv_addr.type = sync->peer_id_addr_type;
+	if (sync->peer_addr_resolved) {
+		/* Mark it as identity address from RPA (0x02, 0x03) */
+		MARK_AS_IDENTITY_ADDR(sep->adv_addr.type);
+	}
+	(void)memcpy(sep->adv_addr.a.val, sync->peer_id_addr, BDADDR_SIZE);
 
-	sep->sid = scan->periodic.sid;
+	sep->sid = sync->sid;
 	sep->phy = find_lsb_set(se->phy);
 	sep->interval = sys_cpu_to_le16(se->interval);
 	sep->clock_accuracy = se->sca;
@@ -7839,8 +8032,11 @@ static void le_big_sync_established(struct pdu_data *pdu,
 {
 	struct bt_hci_evt_le_big_sync_established *sep;
 	struct ll_sync_iso_set *sync_iso;
+	uint32_t transport_latency_big;
 	struct node_rx_sync_iso *se;
 	struct lll_sync_iso *lll;
+	uint32_t iso_interval_us;
+	uint32_t big_sync_delay;
 	size_t evt_size;
 	void *node;
 
@@ -7852,7 +8048,7 @@ static void le_big_sync_established(struct pdu_data *pdu,
 	sync_iso = node_rx->rx_ftr.param;
 	lll = &sync_iso->lll;
 
-	evt_size = sizeof(*sep) + (lll->num_bis * sizeof(uint16_t));
+	evt_size = sizeof(*sep) + (lll->stream_count * sizeof(uint16_t));
 
 	sep = meta_evt(buf, BT_HCI_EVT_LE_BIG_SYNC_ESTABLISHED, evt_size);
 	sep->big_handle = (uint8_t)node_rx->hdr.handle;
@@ -7869,9 +8065,34 @@ static void le_big_sync_established(struct pdu_data *pdu,
 		return;
 	}
 
-	/* FIXME: Fill latency */
-	sys_put_le24(0, sep->latency);
+	/* BT Core v5.4 - Vol 6, Part B, Section 4.4.6.4:
+	 * BIG_Sync_Delay = (Num_BIS – 1) × BIS_Spacing + (NSE – 1) × Sub_Interval + MPT.
+	 *
+	 * BT Core v5.4 - Vol 6, Part G, Section 3.2.1: (Framed)
+	 * Transport_Latenct_BIG = BIG_Sync_Delay + PTO × (NSE / BN – IRC) * ISO_Interval +
+	 *                             ISO_Interval + SDU_Interval
+	 *
+	 * BT Core v5.4 - Vol 6, Part G, Section 3.2.2: (Unframed)
+	 * Transport_Latenct_BIG = BIG_Sync_Delay + (PTO × (NSE / BN – IRC) + 1) * ISO_Interval -
+	 *                             SDU_Interval
+	 */
+	iso_interval_us = lll->iso_interval * ISO_INT_UNIT_US;
+	big_sync_delay = ull_iso_big_sync_delay(lll->num_bis, lll->bis_spacing, lll->nse,
+						lll->sub_interval, lll->phy, lll->max_pdu,
+						lll->enc);
+	if (lll->framing) {
+		/* Framed */
+		transport_latency_big = big_sync_delay +
+					lll->pto * (lll->nse / lll->bn - lll->irc) *
+					iso_interval_us + iso_interval_us + lll->sdu_interval;
+	} else {
+		/* Unframed */
+		transport_latency_big = big_sync_delay +
+					(lll->pto * (lll->nse / lll->bn - lll->irc) + 1) *
+					iso_interval_us - lll->sdu_interval;
+	}
 
+	sys_put_le24(transport_latency_big, sep->latency);
 	sep->nse = lll->nse;
 	sep->bn = lll->bn;
 	sep->pto = lll->pto;
@@ -8040,7 +8261,7 @@ static void le_scan_req_received(struct pdu_data *pdu_data,
 		ll_rl_id_addr_get(rl_idx, &sep->addr.type,
 				  &sep->addr.a.val[0]);
 		/* Mark it as identity address from RPA (0x02, 0x03) */
-		sep->addr.type += 2U;
+		MARK_AS_IDENTITY_ADDR(sep->addr.type);
 	} else {
 #else
 	if (1) {
@@ -8080,7 +8301,7 @@ static void le_vs_scan_req_received(struct pdu_data *pdu,
 		ll_rl_id_addr_get(rl_idx, &sep->addr.type,
 				  &sep->addr.a.val[0]);
 		/* Mark it as identity address from RPA (0x02, 0x03) */
-		sep->addr.type += 2U;
+		MARK_AS_IDENTITY_ADDR(sep->addr.type);
 	} else {
 #else
 	if (1) {
@@ -8428,6 +8649,12 @@ static void encode_control(struct node_rx_pdu *node_rx,
 		le_per_adv_sync_lost(pdu_data, node_rx, buf);
 		break;
 
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER)
+	case NODE_RX_TYPE_SYNC_TRANSFER_RECEIVED:
+		le_per_adv_sync_transfer_received(pdu_data, node_rx, buf);
+		return;
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER */
+
 #if defined(CONFIG_BT_CTLR_DF_SCAN_CTE_RX)
 	case NODE_RX_TYPE_SYNC_IQ_SAMPLE_REPORT:
 #if defined(CONFIG_BT_CTLR_DF_VS_CL_IQ_REPORT_16_BITS_IQ_SAMPLES)
@@ -8566,11 +8793,13 @@ static void encode_control(struct node_rx_pdu *node_rx,
 
 #if defined(CONFIG_BT_CTLR_PROFILE_ISR)
 	case NODE_RX_TYPE_PROFILE:
-		LOG_INF("l: %u, %u, %u; t: %u, %u, %u; cpu: %u, %u, %u, %u.",
+		LOG_INF("l: %u, %u, %u; t: %u, %u, %u; cpu: %u (%u), %u (%u), %u (%u), %u (%u).",
 			pdu_data->profile.lcur, pdu_data->profile.lmin, pdu_data->profile.lmax,
 			pdu_data->profile.cur, pdu_data->profile.min, pdu_data->profile.max,
-			pdu_data->profile.radio, pdu_data->profile.lll, pdu_data->profile.ull_high,
-			pdu_data->profile.ull_low);
+			pdu_data->profile.radio, pdu_data->profile.radio_ticks,
+			pdu_data->profile.lll, pdu_data->profile.lll_ticks,
+			pdu_data->profile.ull_high, pdu_data->profile.ull_high_ticks,
+			pdu_data->profile.ull_low, pdu_data->profile.ull_low_ticks);
 		return;
 #endif /* CONFIG_BT_CTLR_PROFILE_ISR */
 
@@ -8969,6 +9198,10 @@ uint8_t hci_get_class(struct node_rx_pdu *node_rx)
 		case NODE_RX_TYPE_SYNC:
 		case NODE_RX_TYPE_SYNC_REPORT:
 		case NODE_RX_TYPE_SYNC_LOST:
+
+#if defined(CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER)
+		case NODE_RX_TYPE_SYNC_TRANSFER_RECEIVED:
+#endif /* CONFIG_BT_CTLR_SYNC_TRANSFER_RECEIVER */
 
 #if defined(CONFIG_BT_CTLR_DF_SCAN_CTE_RX)
 		case NODE_RX_TYPE_SYNC_IQ_SAMPLE_REPORT:

@@ -26,8 +26,16 @@ static int get_bit_and_reset(const struct device *dev, int mask)
 {
 	int result = DRV_STATUS(dev) & mask;
 
-	/* Clear the bit(s) */
+	/*
+	 * Clear the bit(s):
+	 *   For emulator, write 0 to clear status bit(s).
+	 *   For real chip, write 1 to clear status bit(s).
+	 */
+#ifdef CONFIG_BBRAM_NPCX_EMUL
 	DRV_STATUS(dev) &= ~mask;
+#else
+	DRV_STATUS(dev) = mask;
+#endif
 
 	return result;
 }
@@ -82,7 +90,7 @@ static int bbram_npcx_write(const struct device *dev, size_t offset, size_t size
 	return 0;
 }
 
-static const struct bbram_driver_api bbram_npcx_driver_api = {
+static DEVICE_API(bbram, bbram_npcx_driver_api) = {
 	.check_invalid = bbram_npcx_check_invalid,
 	.check_standby_power = bbram_npcx_check_standby_power,
 	.check_power = bbram_npcx_check_power,

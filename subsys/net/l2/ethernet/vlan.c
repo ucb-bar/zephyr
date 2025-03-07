@@ -136,7 +136,6 @@ static struct vlan_context *get_vlan_ctx(struct net_if *main_iface,
 		}
 
 		ctx = net_if_get_device(vctx->virtual_iface)->data;
-		NET_ASSERT(vctx != NULL);
 
 		if (any_tag) {
 			if (ctx->tag != NET_VLAN_TAG_UNSPEC) {
@@ -190,8 +189,8 @@ static struct vlan_context *get_vlan(struct net_if *iface,
 		goto out;
 	}
 
-	/* If the interface is virtual, then it should be be the VLAN one.
-	 * Just get the Ethernet interface it points to to get the context.
+	/* If the interface is virtual, then it should be the VLAN one.
+	 * Just get the Ethernet interface it points to get the context.
 	 */
 	ctx = get_vlan_ctx(net_virtual_get_iface(iface), vlan_tag, false);
 
@@ -602,8 +601,8 @@ static enum net_verdict vlan_interface_recv(struct net_if *iface,
 		char str[sizeof("RX iface xx (tag xxxx)")];
 
 		snprintk(str, sizeof(str), "RX iface %d (tag %d)",
-			 net_pkt_vlan_tag(pkt),
-			 net_if_get_by_iface(iface));
+			 net_if_get_by_iface(iface),
+			 net_pkt_vlan_tag(pkt));
 
 		net_pkt_hexdump(pkt, str);
 	}

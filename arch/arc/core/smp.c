@@ -16,6 +16,7 @@
 #include <ipi.h>
 #include <zephyr/init.h>
 #include <zephyr/irq.h>
+#include <zephyr/platform/hooks.h>
 #include <arc_irq_offload.h>
 
 volatile struct {
@@ -115,6 +116,11 @@ void arch_secondary_cpu_init(int cpu_num)
 			   DT_IRQ(DT_NODELABEL(ici), priority), 0);
 	irq_enable(DT_IRQN(DT_NODELABEL(ici)));
 #endif
+
+#ifdef CONFIG_SOC_PER_CORE_INIT_HOOK
+	soc_per_core_init_hook();
+#endif /* CONFIG_SOC_PER_CORE_INIT_HOOK */
+
 	/* call the function set by arch_cpu_start */
 	fn = arc_cpu_init[cpu_num].fn;
 
@@ -195,5 +201,4 @@ int arch_smp_init(void)
 
 	return 0;
 }
-SYS_INIT(arch_smp_init, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 #endif

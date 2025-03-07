@@ -7,8 +7,22 @@ if(CONFIG_MBEDTLS)
 zephyr_interface_library_named(mbedTLS)
 
   if(CONFIG_MBEDTLS_BUILTIN)
-    if(CONFIG_MBEDTLS_ZEPHYR_ENTROPY AND NOT CONFIG_ENTROPY_HAS_DRIVER)
+    if(CONFIG_MBEDTLS_ENTROPY_POLL_ZEPHYR AND NOT CONFIG_ENTROPY_HAS_DRIVER)
       message(WARNING "No entropy device on the system, using fake entropy source!")
+    endif()
+
+    if(CONFIG_MBEDTLS_PSA_CRYPTO_EXTERNAL_RNG)
+      if(CONFIG_MBEDTLS_PSA_CRYPTO_EXTERNAL_RNG_ALLOW_NON_CSPRNG)
+        message(WARNING "
+          Non cryptographycally secure sources are enabled for psa_generate_random().
+          This is meant to be used only for tests, not in production!")
+      else()
+        if(NOT CONFIG_CSPRNG_ENABLED)
+          message(FATAL_ERROR "
+            MBEDTLS_PSA_CRYPTO_EXTERNAL_RNG is set but there is
+            no CSPRNG enabled.")
+        endif()
+      endif()
     endif()
 
     # Add the config-file entry point
@@ -28,6 +42,12 @@ zephyr_interface_library_named(mbedTLS)
         configs
         include
     )
+
+    if (CONFIG_MBEDTLS_PSA_P256M_DRIVER_RAW)
+      target_include_directories(mbedTLS INTERFACE
+        ${ZEPHYR_CURRENT_MODULE_DIR}/3rdparty/p256-m/p256-m
+      )
+    endif()
 
     # Add base library with files required by all drivers/backends.
     zephyr_library_named(mbedTLSBase)
@@ -95,6 +115,7 @@ zephyr_interface_library_named(mbedTLS)
       ${ZEPHYR_CURRENT_MODULE_DIR}/library/version_features.c
       ${ZEPHYR_CURRENT_MODULE_DIR}/library/version.c
       zephyr_init.c
+      zephyr_entropy.c
     )
 
     zephyr_library_sources(${mbedtls_base_src})
@@ -115,7 +136,7 @@ zephyr_interface_library_named(mbedTLS)
 
     zephyr_library_named(mbedTLSCrypto)
 
-    if (CONFIG_MBEDTLS_PSA_CRYPTO_C AND NOT CONFIG_BUILD_WITH_TFM)
+    if (CONFIG_MBEDTLS_PSA_CRYPTO_C)
       list(APPEND crypto_source
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_aead.c
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_cipher.c
@@ -124,6 +145,7 @@ zephyr_interface_library_named(mbedTLS)
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_ffdh.c
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_hash.c
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_mac.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_pake.c
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_rsa.c
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_se.c
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_storage.c
@@ -132,6 +154,14 @@ zephyr_interface_library_named(mbedTLS)
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_client.c
         ${ZEPHYR_CURRENT_MODULE_DIR}/library/psa_crypto_slot_management.c
       )
+    endif()
+
+    if(CONFIG_MBEDTLS_PSA_P256M_DRIVER_ENABLED)
+      list(APPEND crypto_source
+        ${ZEPHYR_CURRENT_MODULE_DIR}/3rdparty/p256-m/p256-m_driver_entrypoints.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/3rdparty/p256-m/p256-m/p256-m.c
+      )
+      zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/library)
     endif()
 
     list(APPEND crypto_source
@@ -147,6 +177,9 @@ zephyr_interface_library_named(mbedTLS)
 
     zephyr_library_sources(${crypto_source})
 
+    # Custom macro to tell that an mbedTLSCrypto source file is being compiled.
+    zephyr_library_compile_definitions(BUILDING_MBEDTLS_CRYPTO)
+
     zephyr_library_link_libraries(mbedTLS)
 
     zephyr_library_link_libraries_ifdef(CONFIG_BUILD_WITH_TFM tfm_api)
@@ -161,6 +194,7 @@ zephyr_interface_library_named(mbedTLS)
       ${ZEPHYR_CURRENT_MODULE_DIR}/library/x509_csr.c
       ${ZEPHYR_CURRENT_MODULE_DIR}/library/x509write_crt.c
       ${ZEPHYR_CURRENT_MODULE_DIR}/library/x509write_csr.c
+      ${ZEPHYR_CURRENT_MODULE_DIR}/library/x509write.c
     )
 
     zephyr_library_sources(${x509_source})

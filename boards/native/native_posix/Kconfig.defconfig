@@ -3,6 +3,9 @@
 
 if BOARD_NATIVE_POSIX
 
+config BOARD_DEPRECATED_RELEASE
+	default "v4.2.0"
+
 config BUILD_OUTPUT_BIN
 	default n
 
@@ -21,11 +24,6 @@ config ETH_NATIVE_POSIX
 	default y if NET_L2_ETHERNET && ETH_DRIVER
 
 endif # NETWORKING
-
-choice BT_HCI_BUS_TYPE
-	default BT_USERCHAN
-	depends on BT_HCI
-endchoice
 
 if CONSOLE
 

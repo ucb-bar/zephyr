@@ -9,6 +9,8 @@
 #include "m5stickc_plus-pinctrl.dtsi"
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/regulator/axp192.h>
+#include <zephyr/dt-bindings/mipi_dbi/mipi_dbi.h>
+#include <espressif/partitions_0x1000_amp.dtsi>
 
 / {
 	model = "M5StickC Plus PROCPU";
@@ -26,13 +28,14 @@
 	};
 
 	chosen {
-		zephyr,sram = &sram0;
+		zephyr,sram = &sram1;
 		zephyr,console = &uart0;
 		zephyr,shell-uart = &uart0;
 		zephyr,flash = &flash0;
 		zephyr,code-partition = &slot0_partition;
 		zephyr,rtc = &bm8563;
 		zephyr,display = &st7789v;
+		zephyr,bt-hci = &esp32_bt_hci;
 	};
 
 	leds {
@@ -56,6 +59,44 @@
 			label = "User button 1";
 			gpios = <&gpio1 7 GPIO_ACTIVE_LOW>;
 			zephyr,code = <INPUT_KEY_1>;
+		};
+	};
+
+	mipi_dbi {
+		compatible = "zephyr,mipi-dbi-spi";
+		spi-dev = <&spi3>;
+		dc-gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;
+		write-only;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		st7789v: st7789v@0 {
+			compatible = "sitronix,st7789v";
+			reg = <0>;
+			mipi-max-frequency = <20000000>;
+
+			width = <135>;
+			height = <240>;
+			x-offset = <53>;
+			y-offset = <40>;
+
+			vcom = <0x28>;
+			gctrl = <0x35>;
+			vrhs = <0x10>;
+			vdvs = <0x20>;
+			mdac = <0x00>;
+			gamma = <0x01>;
+			colmod = <0x55>;
+			lcm = <0x2c>;
+			porch-param = [0c 0c 00 33 33];
+			cmd2en-param = [5a 69 02 00];
+			pwctrl1-param = [a4 a1];
+			pvgam-param = [d0 00 02 07 0a 28 32 44 42 06 0e 12 14 17];
+			nvgam-param = [d0 00 02 07 0a 28 31 54 47 0e 1c 17 1b 1e];
+			ram-param = [00 F0];
+			rgb-param = [40 02 14];
+			mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
 		};
 	};
 };
@@ -152,34 +193,6 @@
 	status = "okay";
 	pinctrl-0 = <&spim3_default>;
 	pinctrl-names = "default";
-	st7789v: st7789v@0 {
-		compatible = "sitronix,st7789v";
-		reg = <0>;
-		spi-max-frequency = <20000000>;
-		cmd-data-gpios = <&gpio0 23 GPIO_ACTIVE_LOW>;
-		reset-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;
-
-		width = <135>;
-		height = <240>;
-		x-offset = <53>;
-		y-offset = <40>;
-
-		vcom = <0x28>;
-		gctrl = <0x35>;
-		vrhs = <0x10>;
-		vdvs = <0x20>;
-		mdac = <0x00>;
-		gamma = <0x01>;
-		colmod = <0x55>;
-		lcm = <0x2c>;
-		porch-param = [0c 0c 00 33 33];
-		cmd2en-param = [5a 69 02 00];
-		pwctrl1-param = [a4 a1];
-		pvgam-param = [d0 00 02 07 0a 28 32 44 42 06 0e 12 14 17];
-		nvgam-param = [d0 00 02 07 0a 28 31 54 47 0e 1c 17 1b 1e];
-		ram-param = [00 F0];
-		rgb-param = [40 02 14];
-	};
 };
 
 &timer0 {
@@ -202,41 +215,6 @@
 	status = "okay";
 };
 
-&flash0 {
+&esp32_bt_hci {
 	status = "okay";
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		/* Reserve 60kB for the bootloader */
-		boot_partition: partition@1000 {
-			label = "mcuboot";
-			reg = <0x00001000 0x0000F000>;
-			read-only;
-		};
-
-		/* Reserve 1024kB for the application in slot 0 */
-		slot0_partition: partition@10000 {
-			label = "image-0";
-			reg = <0x00010000 0x00100000>;
-		};
-
-		/* Reserve 1024kB for the application in slot 1 */
-		slot1_partition: partition@110000 {
-			label = "image-1";
-			reg = <0x00110000 0x00100000>;
-		};
-
-		/* Reserve 256kB for the scratch partition */
-		scratch_partition: partition@210000 {
-			label = "image-scratch";
-			reg = <0x00210000 0x00040000>;
-		};
-
-		storage_partition: partition@250000 {
-			label = "storage";
-			reg = <0x00250000 0x00006000>;
-		};
-	};
 };

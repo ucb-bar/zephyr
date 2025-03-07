@@ -1,0 +1,10 @@
+# CTHINGS.CO Connectivity Card board configuration
+
+# Copyright (c) 2024 CTHINGS.CO
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_CTCC_NRF52840
+
+source "boards/common/usb/Kconfig.cdc_acm_serial.defconfig"
+
+endif # BOARD_CTCC_NRF52840

@@ -103,6 +103,13 @@ config XTENSA_NUM_SPIN_RELAX_NOPS
 	  Specify the number of NOPs in Xtensa specific
 	  arch_spin_relax().
 
+config XTENSA_BREAK_ON_UNRECOVERABLE_EXCEPTIONS
+	bool "Use BREAK instruction on unrecoverable exceptions"
+	help
+	  Use BREAK instruction when unrecoverable exceptions are
+	  encountered. This requires a debugger attached to catch
+	  the BREAK.
+
 menu "Xtensa HiFi Options"
 
 config XTENSA_CPU_HAS_HIFI
@@ -149,6 +156,12 @@ config XTENSA_HIFI_SHARING
 endif    # XTENSA_CPU_HAS_HIFI
 
 endmenu  # Xtensa HiFi Options
+
+config XTENSA_INTERRUPT_NONPREEMPTABLE
+	bool "Xtensa exceptions and interrupts cannot be pre-empted"
+	help
+	  Allow use of medium and high priority interrupts without
+	  pre-empting low priority interrupts and exceptions.
 
 if CPU_HAS_MMU
 
@@ -270,7 +283,7 @@ config XTENSA_SYSCALL_USE_HELPER
 	default y if "$(ZEPHYR_TOOLCHAIN_VARIANT)" = "xt-clang"
 	depends on (XTENSA_MMU || XTENSA_MPU) && USERSPACE
 	help
-	  Use syscall helpers for passing more then 3 arguments.
+	  Use syscall helpers for passing more than 3 arguments.
 	  This is a workaround for toolchains where they have
 	  issue modeling register usage.
 

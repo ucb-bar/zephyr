@@ -1,7 +1,4 @@
-.. _steval_stwinbx1_board:
-
-STEVAL STWINBX1 Development kit
-###############################
+.. zephyr:board:: steval_stwinbx1
 
 Overview
 ********
@@ -12,10 +9,6 @@ IoT contexts such as condition monitoring and predictive maintenance.
 
 The STEVAL-STWINBX1 kit consists of an STWIN.box core system, a 480mAh LiPo battery, an adapter for the ST-LINK debugger,
 a plastic case, an adapter board for DIL 24 sensors and a flexible cable.
-
-.. image:: img/steval_stwinbx1.jpg
-     :align: center
-     :alt: STEVAL-STWINBX1 Development kit
 
 More information about the board can be found at the `STEVAL-STWINBX1 Development kit website`_.
 
@@ -236,57 +229,26 @@ Console
 
 There are two possible options for Zephyr console output:
 
+
+- through common CDC ACM UART backend configuration for all boards
+
 - through USART2 which is available on SWD connector (CN4). In this case a JTAG adapter
   can be used to connect STEVAL-STWINBX1 and have both SWD and console lines available.
 
-  To enable console and shell over UART
+  To enable console and shell over UART:
 
-  - switch the console lines from cdc_acm to uart4
-    (:file:`boards/st/steval_stwinbx1/steval_stwinbx1.dts`)
+  - in your prj.conf, override the board's default configuration by setting :code:`CONFIG_BOARD_SERIAL_BACKEND_CDC_ACM=n`
 
-  - comment out the USB configuration macros
-    (:file:`boards/st/steval_stwinbx1/steval_stwinbx1_defconfig`)
+  - add an overlay file named ``<board>.overlay``:
 
 .. code-block:: dts
-   :caption: boards/st/steval_stwinbx1/steval_stwinbx1.dts
 
    / {
        chosen {
           zephyr,console = &usart2;
           zephyr,shell-uart = &usart2;
-          //zephyr,console = &cdc_acm_uart0;
-          //zephyr,shell-uart = &cdc_acm_uart0;
         };
      };
-
-.. code-block:: Kconfig
-   :caption: boards/st/steval_stwinbx1/steval_stwinbx1_defconfig
-
-   # Comment out following USB config lines when
-   # switching console to UART
-   #CONFIG_USB_DEVICE_STACK=y
-   #CONFIG_USB_DEVICE_VID=0x0483
-   #CONFIG_USB_DEVICE_PID=0x5740
-   #CONFIG_USB_DEVICE_PRODUCT="Zephyr CDC STEval-STWinbx1"
-   #CONFIG_USB_DEVICE_INITIALIZE_AT_BOOT=n
-
-- through USB as USB CDC/ACM class. This is the default case present in the board dts file.
-
-.. code-block:: dts
-   :caption: boards/st/steval_stwinbx1/steval_stwinbx1.dts
-
-   / {
-       chosen {
-          zephyr,console = &cdc_acm_uart0;
-        };
-     };
-
-     &zephyr_udc0 {
-        cdc_acm_uart0: cdc_acm_uart0 {
-                compatible = "zephyr,cdc-acm-uart";
-        };
-     };
-
 
 
 Console default settings are 115200 8N1.
@@ -376,10 +338,9 @@ You should see the following confirmation on your Linux host:
    usb 3-1: Manufacturer: STMicroelectronics
    usb 3-1: SerialNumber: 207136863530
 
-.. You can build and flash the provided sample application
-.. (:ref:`sensortile_box_pro_sample_sensors`) that reads sensors data and outputs
-.. values on the console.
-
+You can build and flash the provided sample application
+(:zephyr:code-sample:`stwinbx1_sensors`) that reads sensors data and outputs
+values on the console.
 
 .. _STEVAL-STWINBX1 Development kit website:
    https://www.st.com/en/evaluation-tools/steval-stwinbx1.html

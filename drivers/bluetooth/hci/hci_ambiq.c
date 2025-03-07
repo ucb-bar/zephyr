@@ -13,7 +13,7 @@
 #include <zephyr/init.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/drivers/spi.h>
-#include <zephyr/drivers/bluetooth/hci_driver.h>
+#include <zephyr/drivers/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 
 #define LOG_LEVEL CONFIG_BT_HCI_DRIVER_LOG_LEVEL
@@ -21,9 +21,6 @@
 LOG_MODULE_REGISTER(bt_hci_driver);
 
 #include "apollox_blue.h"
-
-#define HCI_SPI_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(ambiq_bt_hci_spi)
-#define SPI_DEV_NODE DT_BUS(HCI_SPI_NODE)
 
 /* Offset of special item */
 #define PACKET_TYPE         0
@@ -56,11 +53,13 @@ LOG_MODULE_REGISTER(bt_hci_driver);
 #define SPI_BUSY_TX_ATTEMPTS      200
 
 static uint8_t __noinit rxmsg[SPI_MAX_RX_MSG_LEN];
-static const struct device *spi_dev = DEVICE_DT_GET(SPI_DEV_NODE);
-static struct spi_config spi_cfg = {
-	.operation = SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | SPI_MODE_CPOL | SPI_MODE_CPHA |
-		     SPI_WORD_SET(8),
-};
+
+static struct spi_dt_spec spi_bus =
+	SPI_DT_SPEC_INST_GET(0,
+			     SPI_OP_MODE_MASTER | SPI_HALF_DUPLEX | SPI_TRANSFER_MSB |
+				     SPI_MODE_CPOL | SPI_MODE_CPHA | SPI_WORD_SET(8),
+			     0);
+
 static K_KERNEL_STACK_DEFINE(spi_rx_stack, CONFIG_BT_DRV_RX_STACK_SIZE);
 static struct k_thread spi_rx_thread_data;
 
@@ -71,6 +70,10 @@ static const struct spi_buf_set spi_rx = {.buffers = &spi_rx_buf, .count = 1};
 
 static K_SEM_DEFINE(sem_irq, 0, 1);
 static K_SEM_DEFINE(sem_spi_available, 1, 1);
+
+struct bt_apollo_data {
+	bt_hci_recv_t recv;
+};
 
 void bt_packet_irq_isr(const struct device *unused1, struct gpio_callback *unused2,
 		       uint32_t unused3)
@@ -93,11 +96,11 @@ static inline int bt_spi_transceive(void *tx, uint32_t tx_len, void *rx, uint32_
 	 * held at this moment to continue to send or receive packets.
 	 */
 	if (tx_len && rx_len) {
-		spi_cfg.operation |= SPI_HOLD_ON_CS;
+		spi_bus.config.operation |= SPI_HOLD_ON_CS;
 	} else {
-		spi_cfg.operation &= ~SPI_HOLD_ON_CS;
+		spi_bus.config.operation &= ~SPI_HOLD_ON_CS;
 	}
-	return spi_transceive(spi_dev, &spi_cfg, &spi_tx, &spi_rx);
+	return spi_transceive_dt(&spi_bus, &spi_tx, &spi_rx);
 }
 
 static int spi_send_packet(uint8_t *data, uint16_t len)
@@ -288,7 +291,9 @@ static struct net_buf *bt_hci_acl_recv(uint8_t *data, size_t len)
 
 static void bt_spi_rx_thread(void *p1, void *p2, void *p3)
 {
-	ARG_UNUSED(p1);
+	const struct device *dev = p1;
+	struct bt_apollo_data *hci = dev->data;
+
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
@@ -331,13 +336,13 @@ static void bt_spi_rx_thread(void *p1, void *p2, void *p3)
 
 			/* Post the RX message to host stack to process */
 			if (buf) {
-				bt_recv(buf);
+				hci->recv(dev, buf);
 			}
 		} while (0);
 	}
 }
 
-static int bt_hci_send(struct net_buf *buf)
+static int bt_apollo_send(const struct device *dev, struct net_buf *buf)
 {
 	int ret = 0;
 
@@ -368,26 +373,45 @@ static int bt_hci_send(struct net_buf *buf)
 	return ret;
 }
 
-static int bt_hci_open(void)
+static int bt_apollo_open(const struct device *dev, bt_hci_recv_t recv)
 {
+	struct bt_apollo_data *hci = dev->data;
 	int ret;
 
-	ret = bt_hci_transport_setup(spi_dev);
+	ret = bt_hci_transport_setup(spi_bus.bus);
 	if (ret) {
 		return ret;
 	}
 
 	/* Start RX thread */
 	k_thread_create(&spi_rx_thread_data, spi_rx_stack, K_KERNEL_STACK_SIZEOF(spi_rx_stack),
-			(k_thread_entry_t)bt_spi_rx_thread, NULL, NULL, NULL,
+			(k_thread_entry_t)bt_spi_rx_thread, (void *)dev, NULL, NULL,
 			K_PRIO_COOP(CONFIG_BT_DRIVER_RX_HIGH_PRIO), 0, K_NO_WAIT);
 
 	ret = bt_apollo_controller_init(spi_send_packet);
+	if (ret == 0) {
+		hci->recv = recv;
+	}
 
 	return ret;
 }
 
-static int bt_spi_setup(const struct bt_hci_setup_params *params)
+static int bt_apollo_close(const struct device *dev)
+{
+	int ret;
+	struct bt_apollo_data *hci = dev->data;
+
+	ret = bt_apollo_controller_deinit();
+	if (ret) {
+		return ret;
+	}
+
+	hci->recv = NULL;
+
+	return ret;
+}
+
+static int bt_apollo_setup(const struct device *dev, const struct bt_hci_setup_params *params)
 {
 	ARG_UNUSED(params);
 
@@ -398,19 +422,20 @@ static int bt_spi_setup(const struct bt_hci_setup_params *params)
 	return ret;
 }
 
-static const struct bt_hci_driver drv = {
-	.name = "ambiq hci",
-	.bus = BT_HCI_DRIVER_BUS_SPI,
-	.open = bt_hci_open,
-	.send = bt_hci_send,
-	.setup = bt_spi_setup,
+static DEVICE_API(bt_hci, drv) = {
+	.open = bt_apollo_open,
+	.close = bt_apollo_close,
+	.send = bt_apollo_send,
+	.setup = bt_apollo_setup,
 };
 
-static int bt_hci_init(void)
+static int bt_apollo_init(const struct device *dev)
 {
 	int ret;
 
-	if (!device_is_ready(spi_dev)) {
+	ARG_UNUSED(dev);
+
+	if (!device_is_ready(spi_bus.bus)) {
 		LOG_ERR("SPI device not ready");
 		return -ENODEV;
 	}
@@ -420,11 +445,15 @@ static int bt_hci_init(void)
 		return ret;
 	}
 
-	bt_hci_driver_register(&drv);
-
 	LOG_DBG("BT HCI initialized");
 
 	return 0;
 }
 
-SYS_INIT(bt_hci_init, POST_KERNEL, CONFIG_BT_HCI_INIT_PRIORITY);
+#define HCI_DEVICE_INIT(inst)                                                                      \
+	static struct bt_apollo_data hci_data_##inst = {};                                         \
+	DEVICE_DT_INST_DEFINE(inst, bt_apollo_init, NULL, &hci_data_##inst, NULL, POST_KERNEL,     \
+			      CONFIG_BT_HCI_INIT_PRIORITY, &drv)
+
+/* Only one instance supported right now */
+HCI_DEVICE_INIT(0)

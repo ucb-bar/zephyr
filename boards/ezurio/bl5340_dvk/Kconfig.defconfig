@@ -57,9 +57,8 @@ config FLASH_LOAD_SIZE
 
 endif # BOARD_BL5340_DVK_NRF5340_CPUAPP_NS
 
-choice BT_HCI_BUS_TYPE
-	default BT_HCI_IPC if BT
-endchoice
+config BT_HCI_IPC
+	default y if BT
 
 config HEAP_MEM_POOL_ADD_SIZE_BOARD
 	int
@@ -88,7 +87,7 @@ choice LV_COLOR_DEPTH
 	default LV_COLOR_DEPTH_16
 endchoice
 
-config LV_COLOR_16_SWAP
+configdefault LV_COLOR_16_SWAP
 	default y
 
 config INPUT
@@ -100,18 +99,7 @@ endif # DISPLAY
 
 endif # BOARD_BL5340_DVK_NRF5340_CPUAPP || BOARD_BL5340_DVK_NRF5340_CPUAPP_NS
 
-config IPM_NRFX
-	default IPM
-
-config MBOX_NRFX_IPC
-	default MBOX
-
 if BOARD_BL5340_DVK_NRF5340_CPUNET
-
-# BT_CTLR depends on BT. When BT is enabled we should default to also
-# enabling the controller.
-config BT_CTLR
-	default y if BT
 
 config BT_ECC
 	default y if BT

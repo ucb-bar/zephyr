@@ -16,8 +16,19 @@ set(Sysbuild_DIR ${CMAKE_CURRENT_LIST_DIR}/../sysbuild-package/cmake)
 
 project(sysbuild_toplevel LANGUAGES)
 
+if(NOT DEFINED APPLICATION_BINARY_DIR)
+  set(APPLICATION_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR} CACHE PATH "Application Binary Directory")
+endif()
+
 if(EXISTS ${APP_DIR}/sysbuild/CMakeLists.txt)
-  add_subdirectory(${APP_DIR}/sysbuild sysbuild/application)
+  add_subdirectory(${APP_DIR}/sysbuild _sysbuild)
 else()
-  add_subdirectory(template sysbuild/application)
+  add_subdirectory(template _sysbuild)
+endif()
+
+build_info(sysbuild VALUE true)
+build_info(application source-dir VALUE ${CMAKE_CURRENT_SOURCE_DIR})
+yaml_context(EXISTS NAME build_info result)
+if(result)
+  yaml_save(NAME build_info)
 endif()
