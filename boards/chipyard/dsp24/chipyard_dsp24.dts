@@ -16,13 +16,24 @@
 	current-speed = <115200>;  // Set appropriate baud rate
 };
 
+&i2c0 {
+	status = "okay";
+};
+
 &htif {
 	status = "disabled";
 };
 
+// &ram0 {
+// 	reg = < 0x08000000 0x00008000 >;
+// };
+
 &ram0 {
-	reg = < 0x08000000 0x00008000 >;
+	reg = < 0x80000000 0x00080000 >;
 };
 
+&flash0 {
+	status = "okay";
+};
 
 

@@ -40,6 +40,7 @@
 		interrupt-parent = <&plic>;
 		interrupts = <52 1>;
 		reg = <0x10040000 0x1000>;
+		clock-frequency = <100000>;
 		reg-names = "control";
 		status = "disabled";
 		#address-cells = <1>;
