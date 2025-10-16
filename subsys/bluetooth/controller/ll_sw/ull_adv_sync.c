@@ -278,7 +278,7 @@ uint8_t ll_adv_sync_ad_data_set(uint8_t handle, uint8_t op, uint8_t len,
 	/* Check if periodic advertising is associated with advertising set */
 	lll_sync = adv->lll.sync;
 	if (!lll_sync) {
-		return BT_HCI_ERR_UNKNOWN_ADV_IDENTIFIER;
+		return BT_HCI_ERR_CMD_DISALLOWED;
 	}
 
 	sync = HDR_LLL2ULL(lll_sync);
@@ -804,16 +804,9 @@ uint32_t ull_adv_sync_evt_init(struct ll_adv_set *adv,
 
 	time_us = sync_time_get(sync, pdu);
 
-	/* TODO: active_to_start feature port */
-	sync->ull.ticks_active_to_start = 0U;
-	sync->ull.ticks_prepare_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
-	sync->ull.ticks_preempt_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 	sync->ull.ticks_slot = HAL_TICKER_US_TO_TICKS_CEIL(time_us);
 
-	ticks_slot_offset = MAX(sync->ull.ticks_active_to_start,
-				sync->ull.ticks_prepare_to_start);
+	ticks_slot_offset = HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
 	if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT)) {
 		ticks_slot_overhead = ticks_slot_offset;
 	} else {
@@ -1401,7 +1394,6 @@ static void ull_adv_sync_copy_pdu_header(struct pdu_adv *target_pdu,
 		memcpy(target_hdr, source_hdr, source_hdr->ext_hdr_len + 1U);
 	} else {
 		/* Copy field by field */
-
 		source_dptr = source_hdr->ext_hdr.data;
 		target_dptr = target_hdr->ext_hdr.data;
 
@@ -1412,7 +1404,7 @@ static void ull_adv_sync_copy_pdu_header(struct pdu_adv *target_pdu,
 
 #if defined(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
 		if (source_hdr->ext_hdr.cte_info) {
-			if (!skip_fields->cte_info) {
+			if (!skip_fields || !skip_fields->cte_info) {
 				memcpy(target_dptr, source_dptr, sizeof(struct pdu_cte_info));
 				target_dptr += sizeof(struct pdu_cte_info);
 				target_hdr->ext_hdr.cte_info = 1U;
@@ -1423,7 +1415,7 @@ static void ull_adv_sync_copy_pdu_header(struct pdu_adv *target_pdu,
 
 #if defined(CONFIG_BT_CTLR_ADV_PERIODIC_ADI_SUPPORT)
 		if (source_hdr->ext_hdr.adi) {
-			if (!skip_fields->adi) {
+			if (!skip_fields || !skip_fields->adi) {
 				memcpy(target_dptr, source_dptr, sizeof(struct pdu_adv_adi));
 				target_dptr += sizeof(struct pdu_adv_adi);
 				target_hdr->ext_hdr.adi = 1U;
@@ -1434,7 +1426,7 @@ static void ull_adv_sync_copy_pdu_header(struct pdu_adv *target_pdu,
 
 #if defined(CONFIG_BT_CTLR_ADV_SYNC_PDU_LINK)
 		if (source_hdr->ext_hdr.aux_ptr) {
-			if (!skip_fields->aux_ptr) {
+			if (!skip_fields || !skip_fields->aux_ptr) {
 				memcpy(target_dptr, source_dptr, sizeof(struct pdu_adv_aux_ptr));
 				target_dptr += sizeof(struct pdu_adv_aux_ptr);
 				target_hdr->ext_hdr.aux_ptr = 1U;
@@ -1446,7 +1438,7 @@ static void ull_adv_sync_copy_pdu_header(struct pdu_adv *target_pdu,
 		/* SyncInfo is RFU for periodic advertising */
 
 		if (source_hdr->ext_hdr.tx_pwr) {
-			if (!skip_fields->tx_pwr) {
+			if (!skip_fields || !skip_fields->tx_pwr) {
 				*target_dptr = *source_dptr;
 				target_dptr++;
 				target_hdr->ext_hdr.tx_pwr = 1U;

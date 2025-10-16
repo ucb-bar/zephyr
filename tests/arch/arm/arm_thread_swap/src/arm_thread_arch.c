@@ -39,7 +39,7 @@
 extern void z_move_thread_to_end_of_prio_q(struct k_thread *thread);
 
 static struct k_thread alt_thread;
-static K_THREAD_STACK_DEFINE(alt_thread_stack, 1024);
+static K_THREAD_STACK_DEFINE(alt_thread_stack, 1024 + CONFIG_TEST_EXTRA_STACK_SIZE);
 
 /* Status variable to indicate that context-switch has occurred. */
 bool volatile switch_flag;
@@ -147,10 +147,8 @@ static void verify_fp_callee_saved(const struct _preempt_float *src,
 		     (src->s27 == dst->s27) && (src->s28 == dst->s28) &&
 		     (src->s29 == dst->s29) && (src->s30 == dst->s30) &&
 		     (src->s31 == dst->s31),
-		     " got: 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x"
-		     " 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x\n"
-		     " expected:  0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x"
-		     " 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x 0x%0x\n",
+		     " got: %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n"
+		     " expected:  %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
 		     (double)src->s16, (double)src->s17, (double)src->s18, (double)src->s19,
 		     (double)src->s20, (double)src->s21, (double)src->s22, (double)src->s23,
 		     (double)src->s24, (double)src->s25, (double)src->s26, (double)src->s27,
@@ -370,6 +368,10 @@ static int __noinline arch_swap_wrapper(void)
 }
 #endif
 
+/**
+ * @brief Test the ARM thread swap mechanism
+ * @ingroup kernel_arch_sched_tests
+ */
 ZTEST(arm_thread_swap, test_arm_thread_swap)
 {
 	int test_flag;
@@ -662,6 +664,3 @@ ZTEST(arm_thread_swap, test_arm_thread_swap)
 #endif
 #endif /* CONFIG_FPU && CONFIG_FPU_SHARING */
 }
-/**
- * @}
- */

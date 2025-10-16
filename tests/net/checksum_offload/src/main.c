@@ -333,7 +333,7 @@ static int eth_tx_offloading_disabled(const struct device *dev,
 
 	zassert_equal_ptr(&eth_context_offloading_disabled, context,
 			  "Context pointers do not match (%p vs %p)",
-			  eth_context_offloading_disabled, context);
+			  &eth_context_offloading_disabled, context);
 
 	if (!pkt->buffer) {
 		DBG("No data to send!\n");
@@ -377,7 +377,7 @@ static int eth_tx_offloading_enabled(const struct device *dev,
 
 	zassert_equal_ptr(&eth_context_offloading_enabled, context,
 			  "Context pointers do not match (%p vs %p)",
-			  eth_context_offloading_enabled, context);
+			  &eth_context_offloading_enabled, context);
 
 	if (!pkt->buffer) {
 		DBG("No data to send!\n");
@@ -608,19 +608,17 @@ static void test_address_setup(void)
 
 static void add_neighbor(struct net_if *iface, struct in6_addr *addr)
 {
-	struct net_linkaddr_storage llstorage;
 	struct net_linkaddr lladdr;
 	struct net_nbr *nbr;
 
-	llstorage.addr[0] = 0x01;
-	llstorage.addr[1] = 0x02;
-	llstorage.addr[2] = 0x33;
-	llstorage.addr[3] = 0x44;
-	llstorage.addr[4] = 0x05;
-	llstorage.addr[5] = 0x06;
+	lladdr.addr[0] = 0x01;
+	lladdr.addr[1] = 0x02;
+	lladdr.addr[2] = 0x33;
+	lladdr.addr[3] = 0x44;
+	lladdr.addr[4] = 0x05;
+	lladdr.addr[5] = 0x06;
 
 	lladdr.len = 6U;
-	lladdr.addr = llstorage.addr;
 	lladdr.type = NET_LINK_ETHERNET;
 
 	nbr = net_ipv6_nbr_add(iface, addr, &lladdr, false,

@@ -142,8 +142,11 @@ NET_BUF_POOL_FIXED_DEFINE(tx_bufs, CONFIG_NET_BUF_TX_COUNT, CONFIG_NET_BUF_DATA_
 
 NET_BUF_POOL_VAR_DEFINE(rx_bufs, CONFIG_NET_BUF_RX_COUNT, CONFIG_NET_PKT_BUF_RX_DATA_POOL_SIZE,
 			CONFIG_NET_PKT_BUF_USER_DATA_SIZE, NULL);
-NET_BUF_POOL_VAR_DEFINE(tx_bufs, CONFIG_NET_BUF_TX_COUNT, CONFIG_NET_PKT_BUF_TX_DATA_POOL_SIZE,
-			CONFIG_NET_PKT_BUF_USER_DATA_SIZE, NULL);
+
+NET_BUF_POOL_VAR_ALIGN_DEFINE(tx_bufs, CONFIG_NET_BUF_TX_COUNT,
+			      CONFIG_NET_PKT_BUF_TX_DATA_POOL_SIZE,
+			      CONFIG_NET_PKT_BUF_USER_DATA_SIZE, NULL,
+			      CONFIG_NET_PKT_BUF_TX_DATA_ALLOC_ALIGN_LEN);
 
 #endif /* CONFIG_NET_BUF_FIXED_DATA_SIZE */
 
@@ -1665,7 +1668,12 @@ pkt_alloc_with_buffer(struct k_mem_slab *slab,
 	struct net_pkt *pkt;
 	int ret;
 
+#ifdef CONFIG_NET_RAW_MODE
+	/* net_if_get_by_iface is not available in raw mode */
+	NET_DBG("On iface N/A (%p) size %zu", iface, size);
+#else
 	NET_DBG("On iface %d (%p) size %zu", net_if_get_by_iface(iface), iface, size);
+#endif /* CONFIG_NET_RAW_MODE */
 
 #if NET_LOG_LEVEL >= LOG_LEVEL_DBG
 	pkt = pkt_alloc_on_iface(slab, iface, timeout, caller, line);
@@ -1938,7 +1946,8 @@ int net_pkt_read_be32(struct net_pkt *pkt, uint32_t *data)
 
 	ret = net_pkt_read(pkt, d32, sizeof(uint32_t));
 
-	*data = d32[0] << 24 | d32[1] << 16 | d32[2] << 8 | d32[3];
+	*data = (uint32_t)d32[0] << 24 | (uint32_t)d32[1] << 16 |
+		(uint32_t)d32[2] << 8 | (uint32_t)d32[3];
 
 	return ret;
 }
@@ -2007,50 +2016,7 @@ int net_pkt_copy(struct net_pkt *pkt_dst,
 	return 0;
 }
 
-static int32_t net_pkt_find_offset(struct net_pkt *pkt, uint8_t *ptr)
-{
-	struct net_buf *buf;
-	uint32_t ret = -EINVAL;
-	uint16_t offset;
-
-	if (!ptr || !pkt || !pkt->buffer) {
-		return ret;
-	}
-
-	offset = 0U;
-	buf = pkt->buffer;
-
-	while (buf) {
-		if (buf->data <= ptr && ptr < (buf->data + buf->len)) {
-			ret = offset + (ptr - buf->data);
-			break;
-		}
-		offset += buf->len;
-		buf = buf->frags;
-	}
-
-	return ret;
-}
-
-static void clone_pkt_lladdr(struct net_pkt *pkt, struct net_pkt *clone_pkt,
-			     struct net_linkaddr *lladdr)
-{
-	int32_t ll_addr_offset;
-
-	if (!lladdr->addr) {
-		return;
-	}
-
-	ll_addr_offset = net_pkt_find_offset(pkt, lladdr->addr);
-
-	if (ll_addr_offset >= 0) {
-		net_pkt_cursor_init(clone_pkt);
-		net_pkt_skip(clone_pkt, ll_addr_offset);
-		lladdr->addr = net_pkt_cursor_get_pos(clone_pkt);
-	}
-}
-
-#if defined(NET_PKT_HAS_CONTROL_BLOCK)
+#if defined(CONFIG_NET_PKT_CONTROL_BLOCK)
 static inline void clone_pkt_cb(struct net_pkt *pkt, struct net_pkt *clone_pkt)
 {
 	memcpy(net_pkt_cb(clone_pkt), net_pkt_cb(pkt), sizeof(clone_pkt->cb));
@@ -2084,6 +2050,7 @@ static void clone_pkt_attributes(struct net_pkt *pkt, struct net_pkt *clone_pkt)
 	net_pkt_set_rx_timestamping(clone_pkt, net_pkt_is_rx_timestamping(pkt));
 	net_pkt_set_forwarding(clone_pkt, net_pkt_forwarding(pkt));
 	net_pkt_set_chksum_done(clone_pkt, net_pkt_is_chksum_done(pkt));
+	net_pkt_set_loopback(pkt, net_pkt_is_loopback(pkt));
 	net_pkt_set_ip_reassembled(pkt, net_pkt_is_ip_reassembled(pkt));
 	net_pkt_set_cooked_mode(clone_pkt, net_pkt_is_cooked_mode(pkt));
 	net_pkt_set_ipv4_pmtu(clone_pkt, net_pkt_ipv4_pmtu(pkt));
@@ -2101,17 +2068,6 @@ static void clone_pkt_attributes(struct net_pkt *pkt, struct net_pkt *clone_pkt)
 		       sizeof(struct net_linkaddr));
 		memcpy(net_pkt_lladdr_dst(clone_pkt), net_pkt_lladdr_dst(pkt),
 		       sizeof(struct net_linkaddr));
-		/* The link header pointers are usable as-is if we
-		 * shallow-copied the buffer even if they point
-		 * into the fragment memory of the buffer,
-		 * otherwise we have to set the ll address pointer
-		 * relative to the new buffer to avoid dangling
-		 * pointers into the source packet.
-		 */
-		if (pkt->buffer != clone_pkt->buffer) {
-			clone_pkt_lladdr(pkt, clone_pkt, net_pkt_lladdr_src(clone_pkt));
-			clone_pkt_lladdr(pkt, clone_pkt, net_pkt_lladdr_dst(clone_pkt));
-		}
 	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4) && net_pkt_family(pkt) == AF_INET) {
@@ -2400,6 +2356,19 @@ int net_pkt_set_data(struct net_pkt *pkt,
 	}
 
 	return net_pkt_write(pkt, access->data, access->size);
+}
+
+void net_pkt_tx_init(struct net_pkt *pkt)
+{
+	memset(pkt, 0, sizeof(struct net_pkt));
+
+	pkt->atomic_ref = ATOMIC_INIT(1);
+	pkt->slab = &tx_pkts;
+
+	net_pkt_set_ipv6_next_hdr(pkt, 255);
+	net_pkt_set_priority(pkt, TX_DEFAULT_PRIORITY);
+	net_pkt_set_vlan_tag(pkt, NET_VLAN_TAG_UNSPEC);
+	net_pkt_cursor_init(pkt);
 }
 
 void net_pkt_init(void)

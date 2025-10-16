@@ -32,8 +32,8 @@ Supported Features
 
 .. zephyr:board-supported-hw::
 
-Bluetooh support
-----------------
+Bluetooth support
+-----------------
 
 BLE support is enabled; however, to build a Zephyr sample using this board,
 you first need to fetch the Bluetooth controller library into Zephyr as a binary BLOB.
@@ -62,6 +62,8 @@ For more details, please refer to the `Nucleo WB07CC board User Manual`_.
 
 Programming and Debugging
 *************************
+
+.. zephyr:board-supported-runners::
 
 Nucleo WB07CC board includes an ST-LINK-V3EC embedded debug tool interface.
 
@@ -106,6 +108,13 @@ You should see the following message on the console:
 
    Hello World! nucleo_wb07cc/stm32wb07
 
+Usage of the pyOCD runner requires installation of an additional target pack.
+This can be done using the following commands:
+
+.. code-block:: console
+
+   $ pyocd pack update
+   $ pyocd pack install stm32wb0
 
 Debugging
 =========

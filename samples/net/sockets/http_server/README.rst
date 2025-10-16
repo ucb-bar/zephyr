@@ -31,11 +31,14 @@ There are configuration files for various setups in the
     * - :zephyr_file:`ieee802154-overlay.conf <samples/net/sockets/http_server/ieee802154-overlay.conf>`
       - This overlay config can be added for IEEE 802.15.4 support.
 
-    * - :zephyr_file:`overlay-netusb.conf <samples/net/sockets/http_server/overlay-netusb.conf>`
+    * - :zephyr_file:`overlay-usbd.conf <samples/net/sockets/http_server/overlay-usbd.conf>`
       - This overlay config can be added for connecting via network USB.
 
     * - :zephyr_file:`overlay-tls.conf <samples/net/sockets/http_server/overlay-tls.conf>`
       - This overlay config can be added to build the HTTPS variant.
+
+    * - :zephyr_file:`overlay-dhcpv4.conf <samples/net/sockets/http_server/overlay-dhcpv4.conf>`
+      - This overlay enables DHCPv4 client feature.
 
 To build and run the HTTP server application:
 

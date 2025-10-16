@@ -482,11 +482,19 @@ int handle_http1_static_fs_resource(struct http_resource_detail_static_fs *stati
 		sizeof("Content-Length: 01234567890123456789\r\n")
 #define CONTENT_ENCODING_HEADER_SIZE                                                               \
 	sizeof(CONTENT_ENCODING_HEADER) + HTTP_COMPRESSION_MAX_STRING_LEN + sizeof("\r\n")
+/* Calculate the minimum size required for the headers */
 #define STATIC_FS_RESPONSE_SIZE                                                                    \
 	COND_CODE_1(                                                                               \
 		IS_ENABLED(CONFIG_HTTP_SERVER_COMPRESSION),                                        \
 		(STATIC_FS_RESPONSE_BASE_SIZE + CONTENT_ENCODING_HEADER_SIZE),                     \
 		(STATIC_FS_RESPONSE_BASE_SIZE))
+#if CONFIG_HTTP_SERVER_STATIC_FS_RESPONSE_SIZE > 0
+BUILD_ASSERT(CONFIG_HTTP_SERVER_STATIC_FS_RESPONSE_SIZE >= STATIC_FS_RESPONSE_SIZE,
+			"CONFIG_HTTP_SERVER_STATIC_FS_RESPONSE_SIZE must be at least "
+			"large enough to hold HTTP headers");
+#undef STATIC_FS_RESPONSE_SIZE
+#define STATIC_FS_RESPONSE_SIZE CONFIG_HTTP_SERVER_STATIC_FS_RESPONSE_SIZE
+#endif
 
 	enum http_compression chosen_compression = 0;
 	int len;
@@ -678,7 +686,7 @@ static void check_user_request_headers(struct http_header_capture_ctx *ctx, cons
 				break;
 			}
 
-			strcpy(dest, header->name);
+			memcpy(dest, header->name, header_len + 1);
 
 			ctx->headers[ctx->count].name = dest;
 			ctx->cursor += (header_len + 1);
@@ -756,7 +764,7 @@ static void populate_user_request_header(struct http_header_capture_ctx *ctx, co
 	}
 
 	dest = &ctx->buffer[ctx->cursor];
-	strcpy(dest, buf);
+	memcpy(dest, buf, value_len + 1);
 	ctx->cursor += (value_len + 1);
 
 	ctx->headers[ctx->count].value = dest;

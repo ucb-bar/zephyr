@@ -5,12 +5,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @file
+ * @ingroup i3c_interface
+ * @brief Main header file for I3C (Inter-Integrated Circuit) driver API.
+ */
+
 #ifndef ZEPHYR_INCLUDE_DRIVERS_I3C_H_
 #define ZEPHYR_INCLUDE_DRIVERS_I3C_H_
 
 /**
- * @brief I3C Interface
- * @defgroup i3c_interface I3C Interface
+ * @brief Interfaces for Improved Inter-Integrated Circuit (I3C) controllers.
+ * @defgroup i3c_interface I3C
  * @since 3.2
  * @version 0.1.0
  * @ingroup io_interfaces
@@ -35,6 +41,14 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Max and min Open Drain timings.
+ *        Standard I3C SDR and I2C FM speed
+ */
+#define I3C_OD_TLOW_MIN_NS            200
+#define I3C_OD_MIXED_BUS_THIGH_MAX_NS 41
+#define I3C_OD_FIRST_BC_THIGH_MIN_NS  200
 
 /**
  * @name Bus Characteristic Register (BCR)
@@ -458,6 +472,22 @@ struct i3c_config_controller {
 		uint32_t i2c;
 	} scl;
 
+	struct {
+		/**
+		 * Requested minimum SCL Open Drain High period in Nanoseconds
+		 *
+		 * Note:
+		 * - For the first broadcast message, spec requires tHIGH_OD >= 200 ns.
+		 * - For normal messages, tHIGH_OD must not exceed 41 ns (spec max).
+		 */
+		uint32_t high_ns;
+
+		/**
+		 * Requested minimum SCL Open-Drain LOW period in nanoseconds.
+		 */
+		uint32_t low_ns;
+	} scl_od_min;
+
 	/**
 	 * Bit mask of supported HDR modes (0 - 7).
 	 *
@@ -546,7 +576,7 @@ __subsystem struct i3c_driver_api {
 	 */
 	int (*config_get)(const struct device *dev,
 			  enum i3c_config_type type, void *config);
-
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 	/**
 	 * Perform bus recovery
 	 *
@@ -697,20 +727,9 @@ __subsystem struct i3c_driver_api {
 	 */
 	struct i3c_device_desc *(*i3c_device_find)(const struct device *dev,
 						   const struct i3c_device_id *id);
-
-	/**
-	 * ACK or NACK IBI HJ Requests
-	 *
-	 * @see ibi_hj_response()
-	 *
-	 * @param dev Pointer to controller device driver instance.
-	 * @param ack True to ack, False to nack
-	 *
-	 * @return See ibi_hj_response()
-	 */
-	int (*ibi_hj_response)(const struct device *dev,
-			       bool ack);
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#ifdef CONFIG_I3C_USE_IBI
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
 	/**
 	 * Raise In-Band Interrupt (IBI).
 	 *
@@ -725,6 +744,20 @@ __subsystem struct i3c_driver_api {
 	 */
 	int (*ibi_raise)(const struct device *dev,
 			 struct i3c_ibi *request);
+#endif /* CONFIG_I3C_TARGET */
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
+	/**
+	 * ACK or NACK IBI HJ Requests
+	 *
+	 * @see ibi_hj_response()
+	 *
+	 * @param dev Pointer to controller device driver instance.
+	 * @param ack True to ack, False to nack
+	 *
+	 * @return See ibi_hj_response()
+	 */
+	int (*ibi_hj_response)(const struct device *dev,
+			       bool ack);
 
 	/**
 	 * Enable receiving IBI from a target.
@@ -755,7 +788,9 @@ __subsystem struct i3c_driver_api {
 	 */
 	int (*ibi_disable)(const struct device *dev,
 			   struct i3c_device_desc *target);
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#endif /* CONFIG_I3C_USE_IBI */
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
 	/**
 	 * Register config as target device of a controller.
 	 *
@@ -828,8 +863,8 @@ __subsystem struct i3c_driver_api {
 	 */
 	int (*target_controller_handoff)(const struct device *dev,
 					 bool accept);
-
-#ifdef CONFIG_I3C_RTIO
+#endif /* CONFIG_I3C_TARGET */
+#if defined(CONFIG_I3C_RTIO) || defined(__DOXYGEN__)
 	/**
 	 * RTIO
 	 *
@@ -842,7 +877,7 @@ __subsystem struct i3c_driver_api {
 	 */
 	void (*iodev_submit)(const struct device *dev,
 			     struct rtio_iodev_sqe *iodev_sqe);
-#endif
+#endif /* CONFIG_I3C_RTIO */
 };
 
 /**
@@ -854,7 +889,7 @@ __subsystem struct i3c_driver_api {
  */
 struct i3c_device_id {
 	/** Device Provisioned ID */
-	const uint64_t pid:48;
+	uint64_t pid:48;
 };
 
 /**
@@ -890,13 +925,13 @@ struct i3c_device_desc {
 	sys_snode_t node;
 
 	/** I3C bus to which this target device is attached */
-	const struct device * const bus;
+	const struct device *bus;
 
 	/** Device driver instance of the I3C device */
-	const struct device * const dev;
+	const struct device *dev;
 
 	/** Device Provisioned ID */
-	const uint64_t pid;
+	uint64_t pid;
 
 	/**
 	 * Static address for this target device.
@@ -910,7 +945,7 @@ struct i3c_device_desc {
 	 * device (as both are to tell target device to use static
 	 * address as dynamic address).
 	 */
-	const uint8_t static_addr;
+	uint8_t static_addr;
 
 	/**
 	 * Initial dynamic address.
@@ -924,12 +959,13 @@ struct i3c_device_desc {
 	const uint8_t init_dynamic_addr;
 
 	/**
-	 * Device support for SETAASA
+	 * Device Flags
 	 *
-	 * This will be used as an optimization for bus initializtion if the
+	 * BIT[0]: This shall be used as an optimization for bus initializtion if the
 	 * device supports SETAASA.
+	 * BIT[1]: This shall be used to indicate if the device is a I3C v1.0 device
 	 */
-	const bool supports_setaasa;
+	const uint8_t flags;
 
 	/**
 	 * Dynamic Address for this target device used for communication.
@@ -945,18 +981,6 @@ struct i3c_device_desc {
 	 * 0 if address has not been assigned.
 	 */
 	uint8_t dynamic_addr;
-
-#if defined(CONFIG_I3C_USE_GROUP_ADDR) || defined(__DOXYGEN__)
-	/**
-	 * Group address for this target device. Set during:
-	 * - Reset Group Address(es) (RSTGRPA)
-	 * - Set Group Address (SETGRPA)
-	 *
-	 * 0 if group address has not been assigned.
-	 * Only available if @kconfig{CONFIG_I3C_USE_GROUP_ADDR} is set.
-	 */
-	uint8_t group_addr;
-#endif /* CONFIG_I3C_USE_GROUP_ADDR */
 
 	/**
 	 * Bus Characteristic Register (BCR)
@@ -1107,13 +1131,13 @@ struct i3c_i2c_device_desc {
 	const struct device *bus;
 
 	/** Static address for this I2C device. */
-	const uint16_t addr;
+	uint16_t addr;
 
 	/**
 	 * Legacy Virtual Register (LVR)
 	 * @see @ref I3C_LVR
 	 */
-	const uint8_t lvr;
+	uint8_t lvr;
 
 	/** @cond INTERNAL_HIDDEN */
 	/**
@@ -1189,9 +1213,21 @@ struct i3c_dev_list {
  * in the device structure.
  */
 struct i3c_driver_config {
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 	/** I3C/I2C device list struct. */
 	struct i3c_dev_list dev_list;
+
+	/** I3C Primary Controller Dynamic Address */
+	uint8_t primary_controller_da;
+#elif defined(CONFIG_CPP)
+       /* Empty struct has size 0 in C, size 1 in C++. Force them to be the same. */
+	uint8_t unused_cpp_size_compatibility;
+#endif
 };
+
+#if defined(CONFIG_CPP)
+BUILD_ASSERT(sizeof(struct i3c_driver_config) >= 1);
+#endif
 
 /**
  * This structure is common to all I3C drivers and is expected to be the first
@@ -1200,17 +1236,19 @@ struct i3c_driver_config {
 struct i3c_driver_data {
 	/** Controller Configuration */
 	struct i3c_config_controller ctrl_config;
-
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 	/** Attached I3C/I2C devices and addresses */
 	struct i3c_dev_attached_list attached_dev;
-
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
 	/** Received DEFTGTS Pointer */
 	struct i3c_ccc_deftgts *deftgts;
 
 	/** DEFTGTS refreshed */
 	bool deftgts_refreshed;
+#endif /* CONFIG_I3C_TARGET */
+#endif /* CONFIG_I3C_CONTROLLER */
 };
-
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /**
  * @brief iterate over all I3C devices present on the bus
  *
@@ -1350,7 +1388,7 @@ int i3c_dev_list_daa_addr_helper(struct i3c_addr_slots *addr_slots,
 				 bool assigned_okay,
 				 struct i3c_device_desc **target,
 				 uint8_t *addr);
-
+#endif /* CONFIG_I3C_CONTROLLER */
 /**
  * @brief Configure the I3C hardware.
  *
@@ -1376,7 +1414,7 @@ static inline int i3c_configure(const struct device *dev,
 
 	return api->configure(dev, type, config);
 }
-
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /**
  * @brief Get the controller device configuration for an I3C device.
  *
@@ -1397,7 +1435,8 @@ static inline int i3c_configure_controller(const struct device *dev,
 {
 	return i3c_configure(dev, I3C_CONFIG_CONTROLLER, config);
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
 /**
  * @brief Get the target device configuration for an I3C device.
  *
@@ -1418,7 +1457,7 @@ static inline int i3c_configure_target(const struct device *dev,
 {
 	return i3c_configure(dev, I3C_CONFIG_TARGET, config);
 }
-
+#endif /* CONFIG_I3C_TARGET */
 /**
  * @brief Get configuration of the I3C hardware.
  *
@@ -1451,7 +1490,7 @@ static inline int i3c_config_get(const struct device *dev,
 
 	return api->config_get(dev, type, config);
 }
-
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /**
  * @brief Get the controller device configuration for an I3C device.
  *
@@ -1472,7 +1511,8 @@ static inline int i3c_config_get_controller(const struct device *dev,
 {
 	return i3c_config_get(dev, I3C_CONFIG_CONTROLLER, config);
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
 /**
  * @brief Get the target device configuration for an I3C device.
  *
@@ -1493,7 +1533,8 @@ static inline int i3c_config_get_target(const struct device *dev,
 {
 	return i3c_config_get(dev, I3C_CONFIG_TARGET, config);
 }
-
+#endif /* CONFIG_I3C_TARGET */
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /**
  * @brief Attempt bus recovery on the I3C bus.
  *
@@ -1759,12 +1800,14 @@ struct i3c_device_desc *i3c_device_find(const struct device *dev,
 
 	return api->i3c_device_find(dev, id);
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#if defined(CONFIG_I3C_USE_IBI) || defined(__DOXYGEN__)
 /**
  * @addtogroup i3c_ibi
  * @{
  */
 
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /**
  * @brief ACK or NACK IBI HJ Requests
  *
@@ -1789,7 +1832,8 @@ static inline int i3c_ibi_hj_response(const struct device *dev,
 
 	return api->ibi_hj_response(dev, ack);
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
 /**
  * @brief Raise an In-Band Interrupt (IBI).
  *
@@ -1813,7 +1857,8 @@ static inline int i3c_ibi_raise(const struct device *dev,
 
 	return api->ibi_raise(dev, request);
 }
-
+#endif /* CONFIG_I3C_TARGET */
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /**
  * @brief Enable IBI of a target device.
  *
@@ -1863,7 +1908,8 @@ static inline int i3c_ibi_disable(struct i3c_device_desc *target)
 
 	return api->ibi_disable(target->bus, target);
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#endif /* CONFIG_I3C_USE_IBI */
 /**
  * @brief Check if target's IBI has payload.
  *
@@ -1916,7 +1962,7 @@ static inline int i3c_device_is_controller_capable(struct i3c_device_desc *targe
 }
 
 /** @} */
-
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /**
  * @addtogroup i3c_transfer_api
  * @{
@@ -2304,6 +2350,186 @@ static inline int i3c_device_info_get(struct i3c_device_desc *target)
 bool i3c_bus_has_sec_controller(const struct device *dev);
 
 /**
+ * @brief Reset all devices on the bus and clear their dynamic addresses.
+ *
+ * Sends the RSTDAA (Reset Dynamic Address Assignment) CCC to all devices on the bus.
+ *
+ * @param dev Pointer to the controller device driver instance.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_rstdaa_all(const struct device *dev);
+
+/**
+ * @brief Assign a dynamic address to a device using its static address.
+ *
+ * Sends the SETDASA (Set Dynamic Address from Static Address) CCC to the target device.
+ *
+ * @param desc Pointer to the target device descriptor.
+ * @param dynamic_addr The dynamic address to assign to the device.
+ *
+ * @retval 0 If successful.
+ * @retval -EADDRNOTAVAIL If the address is not available.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_setdasa(struct i3c_device_desc *desc, uint8_t dynamic_addr);
+
+/**
+ * @brief Assign a new dynamic address to a device.
+ *
+ * Sends the SETNEWDA (Set New Dynamic Address) CCC to the target device.
+ *
+ * @param desc Pointer to the target device descriptor.
+ * @param dynamic_addr The new dynamic address to assign to the device.
+ *
+ * @retval 0 If successful.
+ * @retval -EADDRNOTAVAIL If the address is not available.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_setnewda(struct i3c_device_desc *desc, uint8_t dynamic_addr);
+
+/**
+ * @brief Assign static addresses as dynamic addresses for all devices on the bus.
+ *
+ * Sends the SETAASA (Set All Addresses to Static Address) CCC to all devices on the bus.
+ *
+ * @param dev Pointer to the controller device driver instance.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_setaasa(const struct device *dev);
+
+/**
+ * @brief Retrieve the Bus Characteristics Register (BCR) of a device.
+ *
+ * Sends the GETBCR CCC to the target device and updates its descriptor.
+ *
+ * @param desc Pointer to the target device descriptor.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_getbcr(struct i3c_device_desc *desc);
+
+/**
+ * @brief Retrieve the Device Characteristics Register (DCR) of a device.
+ *
+ * Sends the GETDCR CCC to the target device and updates its descriptor.
+ *
+ * @param desc Pointer to the target device descriptor.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_getdcr(struct i3c_device_desc *desc);
+
+/**
+ * @brief Retrieve the Provisional ID (PID) of a device.
+ *
+ * Sends the GETPID CCC to the target device and updates its descriptor.
+ *
+ * @param desc Pointer to the target device descriptor.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_getpid(struct i3c_device_desc *desc);
+
+/**
+ * @brief Retrieve the Maximum Read Length (MRL) of a device.
+ *
+ * Sends the GETMRL CCC to the target device and updates its descriptor.
+ *
+ * @param desc Pointer to the target device descriptor.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_getmrl(struct i3c_device_desc *desc);
+
+/**
+ * @brief Retrieve the Maximum Write Length (MWL) of a device.
+ *
+ * Sends the GETMWL CCC to the target device and updates its descriptor.
+ *
+ * @param desc Pointer to the target device descriptor.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_getmwl(struct i3c_device_desc *desc);
+
+/**
+ * @brief Set the Maximum Read Length (MRL) for a device.
+ *
+ * Sends the SETMRL CCC to the target device.
+ *
+ * @param desc Pointer to the target device descriptor.
+ * @param mrl Maximum read length to set.
+ * @param ibi_len Maximum IBI length to set.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_setmrl(struct i3c_device_desc *desc, uint16_t mrl, uint8_t ibi_len);
+
+/**
+ * @brief Set the Maximum Write Length (MWL) for a device.
+ *
+ * Sends the SETMWL CCC to the target device.
+ *
+ * @param desc Pointer to the target device descriptor.
+ * @param mwl Maximum write length to set.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_setmwl(struct i3c_device_desc *desc, uint16_t mwl);
+
+/**
+ * @brief Set the Maximum Read Length (MRL) for all devices on the bus.
+ *
+ * Sends the SETMRL CCC to all devices on the bus.
+ *
+ * @param dev Pointer to the controller device driver instance.
+ * @param mrl Maximum read length to set.
+ * @param ibi_len Maximum IBI length to set.
+ * @param has_ibi_size True if to transmit max ibi len
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_setmrl_all(const struct device *dev, uint16_t mrl, uint8_t ibi_len, bool has_ibi_size);
+
+/**
+ * @brief Set the Maximum Write Length (MWL) for all devices on the bus.
+ *
+ * Sends the SETMWL CCC to all devices on the bus.
+ *
+ * @param dev Pointer to the controller device driver instance.
+ * @param mwl Maximum write length to set.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_setmwl_all(const struct device *dev, uint16_t mwl);
+
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
+/**
+ * @brief Retrieve the Active Controller's Dynamic Address (ACCCR).
+ *
+ * Sends the GETACCCR CCC to the target device and verifies the response.
+ *
+ * @param desc Pointer to the target device descriptor.
+ *
+ * @retval 0 If successful.
+ * @retval -EIO General Input/Output error.
+ */
+int i3c_bus_getacccr(struct i3c_device_desc *desc);
+
+/**
  * @brief Send the CCC DEFTGTS
  *
  * This builds the payload required for DEFTGTS and transmits it out
@@ -2315,6 +2541,7 @@ bool i3c_bus_has_sec_controller(const struct device *dev);
  * @retval -EIO General Input/Output error.
  */
 int i3c_bus_deftgts(const struct device *dev);
+#endif /* CONFIG_I3C_TARGET */
 
 /**
  * @brief Calculate odd parity
@@ -2341,9 +2568,11 @@ uint8_t i3c_odd_parity(uint8_t p);
  * @retval -EIO General Input/Output error.
  * @retval -EBUSY Target cannot accept Controller Handoff
  */
-int i3c_device_controller_handoff(const struct i3c_device_desc *target, bool requested);
+int i3c_device_controller_handoff(struct i3c_device_desc *target, bool requested);
+#endif /* CONFIG_I3C_CONTROLLER */
 
-#ifdef CONFIG_I3C_USE_IBI
+#if defined(CONFIG_I3C_USE_IBI) || defined(__DOXYGEN__)
+#if (defined(CONFIG_I3C_CONTROLLER) && defined(CONFIG_I3C_TARGET)) || defined(__DOXYGEN__)
 /**
  * @brief Call back for when Controllership is Handoffed to itself
  *
@@ -2356,9 +2585,11 @@ int i3c_device_controller_handoff(const struct i3c_device_desc *target, bool req
  * @param work pointer to the work item.
  */
 void i3c_sec_handoffed(struct k_work *work);
-#endif
+#endif /* CONFIG_I3C_CONTROLLER && CONFIG_I3C_TARGET */
+#endif /* CONFIG_I3C_USE_IBI */
 
-#if CONFIG_I3C_NUM_OF_DESC_MEM_SLABS > 0
+#if (defined(CONFIG_I3C_NUM_OF_DESC_MEM_SLABS) && CONFIG_I3C_NUM_OF_DESC_MEM_SLABS > 0) ||         \
+	defined(__DOXYGEN__)
 
 /**
  * @brief Allocate memory for a i3c device descriptor
@@ -2410,7 +2641,8 @@ static inline bool i3c_device_desc_in_pool(struct i3c_device_desc *desc)
 
 #endif /* CONFIG_I3C_NUM_OF_DESC_MEM_SLABS > 0 */
 
-#if CONFIG_I3C_I2C_NUM_OF_DESC_MEM_SLABS > 0
+#if (defined(CONFIG_I3C_I2C_NUM_OF_DESC_MEM_SLABS) && CONFIG_I3C_I2C_NUM_OF_DESC_MEM_SLABS > 0) || \
+	defined(__DOXYGEN__)
 
 /**
  * @brief Allocate memory for a i3c i2c device descriptor
@@ -2536,17 +2768,21 @@ struct rtio_sqe *i3c_rtio_copy(struct rtio *r,
 
 #endif /* CONFIG_I3C_RTIO */
 
+#if defined(CONFIG_I3C_TARGET) || defined(__DOXYGEN__)
 /*
  * This needs to be after declaration of struct i3c_driver_api,
  * or else compiler complains about undefined type inside
  * the static inline API wrappers.
  */
 #include <zephyr/drivers/i3c/target_device.h>
+#endif /* CONFIG_I3C_TARGET */
 
+#if defined(CONFIG_I3C_CONTROLLER) || defined(__DOXYGEN__)
 /*
  * Include High-Data-Rate (HDR) inline helper functions
  */
 #include <zephyr/drivers/i3c/hdr_ddr.h>
+#endif /* CONFIG_I3C_CONTROLLER */
 
 #ifdef __cplusplus
 }

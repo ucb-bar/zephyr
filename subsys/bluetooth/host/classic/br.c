@@ -24,6 +24,12 @@ LOG_MODULE_REGISTER(bt_br);
 
 #define RSSI_INVALID 127
 
+enum __packed resolve_name_state {
+	RESOLVE_REMOTE_NAME_PENDING,
+	RESOLVE_REMOTE_NAME_RESOLVING,
+	RESOLVE_REMOTE_NAME_RESOLVED,
+};
+
 struct bt_br_discovery_result *discovery_results;
 static size_t discovery_results_size;
 static size_t discovery_results_count;
@@ -35,7 +41,7 @@ static int reject_conn(const bt_addr_t *bdaddr, uint8_t reason)
 	struct net_buf *buf;
 	int err;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_REJECT_CONN_REQ, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -58,7 +64,7 @@ static int accept_conn(const bt_addr_t *bdaddr)
 	struct net_buf *buf;
 	int err;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_ACCEPT_CONN_REQ, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -112,7 +118,7 @@ static bool br_sufficient_key_size(struct bt_conn *conn)
 	uint8_t key_size;
 	int err;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_READ_ENCRYPTION_KEY_SIZE, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		LOG_ERR("Failed to allocate command buffer");
 		return false;
@@ -137,6 +143,10 @@ static bool br_sufficient_key_size(struct bt_conn *conn)
 	key_size = rp->key_size;
 	net_buf_unref(rsp);
 
+	if (conn->br.link_key) {
+		conn->br.link_key->enc_key_size = key_size;
+	}
+
 	LOG_DBG("Encryption key size is %u", key_size);
 
 	if (conn->sec_level == BT_SECURITY_L4) {
@@ -155,7 +165,7 @@ bool bt_br_update_sec_level(struct bt_conn *conn)
 
 	if (conn->br.link_key) {
 		if (conn->br.link_key->flags & BT_LINK_KEY_AUTHENTICATED) {
-			if (conn->encrypt == 0x02) {
+			if (conn->encrypt == BT_HCI_ENCRYPTION_ON_BR_AES_CCM) {
 				conn->sec_level = BT_SECURITY_L4;
 			} else {
 				conn->sec_level = BT_SECURITY_L3;
@@ -205,6 +215,12 @@ void bt_hci_synchronous_conn_complete(struct net_buf *buf)
 	}
 
 	sco_conn->handle = handle;
+	sco_conn->sco.air_mode = evt->air_mode;
+
+	if (sco_conn->sco.link_type != evt->link_type) {
+		LOG_WRN("link type mismatch %u != %u", sco_conn->sco.link_type, evt->link_type);
+		sco_conn->sco.link_type = evt->link_type;
+	}
 	bt_conn_set_state(sco_conn, BT_CONN_CONNECTED);
 	bt_conn_unref(sco_conn);
 }
@@ -248,7 +264,7 @@ void bt_hci_conn_complete(struct net_buf *buf)
 
 	bt_conn_unref(conn);
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_READ_REMOTE_FEATURES, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return;
 	}
@@ -264,7 +280,7 @@ static int request_name(const bt_addr_t *addr, uint8_t pscan, uint16_t offset)
 	struct bt_hci_cp_remote_name_request *cp;
 	struct net_buf *buf;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_REMOTE_NAME_REQUEST, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -327,11 +343,10 @@ void bt_br_discovery_reset(void)
 	discovery_results_count = 0;
 }
 
-static void report_discovery_results(void)
+static bool check_request_name(void)
 {
-	bool resolving_names = false;
 	int i;
-	struct bt_br_discovery_cb *listener, *next;
+	bool resolving_names = false;
 
 	for (i = 0; i < discovery_results_count; i++) {
 		struct bt_br_discovery_priv *priv;
@@ -342,16 +357,37 @@ static void report_discovery_results(void)
 			continue;
 		}
 
-		if (request_name(&discovery_results[i].addr, priv->pscan_rep_mode,
-				 priv->clock_offset)) {
+		if (priv->resolve_state != RESOLVE_REMOTE_NAME_PENDING) {
 			continue;
 		}
 
-		priv->resolving = true;
+		if (request_name(&discovery_results[i].addr, priv->pscan_rep_mode,
+				 priv->clock_offset)) {
+			priv->resolve_state = RESOLVE_REMOTE_NAME_RESOLVED;
+			continue;
+		}
+
+		priv->resolve_state = RESOLVE_REMOTE_NAME_RESOLVING;
 		resolving_names = true;
+		break;
 	}
 
-	if (resolving_names) {
+	return resolving_names;
+}
+
+static void report_discovery_results(void)
+{
+	int i;
+	struct bt_br_discovery_cb *listener, *next;
+
+	for (i = 0; i < discovery_results_count; i++) {
+		struct bt_br_discovery_priv *priv;
+
+		priv = &discovery_results[i]._priv;
+		priv->resolve_state = RESOLVE_REMOTE_NAME_PENDING;
+	}
+
+	if (check_request_name()) {
 		return;
 	}
 
@@ -511,7 +547,6 @@ void bt_hci_remote_name_request_complete(struct net_buf *buf)
 	struct bt_br_discovery_priv *priv;
 	int eir_len = 240;
 	uint8_t *eir;
-	int i;
 	struct bt_br_discovery_cb *listener, *next;
 
 	result = get_result_slot(&evt->bdaddr, RSSI_INVALID);
@@ -520,7 +555,7 @@ void bt_hci_remote_name_request_complete(struct net_buf *buf)
 	}
 
 	priv = &result->_priv;
-	priv->resolving = false;
+	priv->resolve_state = RESOLVE_REMOTE_NAME_RESOLVED;
 
 	if (evt->status) {
 		goto check_names;
@@ -572,15 +607,9 @@ void bt_hci_remote_name_request_complete(struct net_buf *buf)
 	}
 
 check_names:
-	/* if still waiting for names */
-	for (i = 0; i < discovery_results_count; i++) {
-		struct bt_br_discovery_priv *dpriv;
-
-		dpriv = &discovery_results[i]._priv;
-
-		if (dpriv->resolving) {
-			return;
-		}
+	/* if still need to request name */
+	if (check_request_name()) {
+		return;
 	}
 
 	/* all names resolved, report discovery results */
@@ -618,7 +647,7 @@ void bt_hci_read_remote_features_complete(struct net_buf *buf)
 		goto done;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_READ_REMOTE_EXT_FEATURES, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		goto done;
 	}
@@ -662,21 +691,21 @@ void bt_hci_role_change(struct net_buf *buf)
 
 	LOG_DBG("status 0x%02x role %u addr %s", evt->status, evt->role, bt_addr_str(&evt->bdaddr));
 
-	if (evt->status) {
-		return;
-	}
-
 	conn = bt_conn_lookup_addr_br(&evt->bdaddr);
 	if (!conn) {
 		LOG_ERR("Can't find conn for %s", bt_addr_str(&evt->bdaddr));
 		return;
 	}
 
-	if (evt->role) {
-		conn->role = BT_CONN_ROLE_PERIPHERAL;
-	} else {
-		conn->role = BT_CONN_ROLE_CENTRAL;
+	if (evt->status == 0) {
+		if (evt->role == BT_HCI_ROLE_PERIPHERAL) {
+			conn->role = BT_CONN_ROLE_PERIPHERAL;
+		} else {
+			conn->role = BT_CONN_ROLE_CENTRAL;
+		}
 	}
+
+	bt_conn_role_changed(conn, evt->status);
 
 	bt_conn_unref(conn);
 }
@@ -692,7 +721,7 @@ static int read_ext_features(void)
 		struct net_buf *buf, *rsp;
 		int err;
 
-		buf = bt_hci_cmd_create(BT_HCI_OP_READ_LOCAL_EXT_FEATURES, sizeof(*cp));
+		buf = bt_hci_cmd_alloc(K_FOREVER);
 		if (!buf) {
 			return -ENOBUFS;
 		}
@@ -781,8 +810,10 @@ int bt_br_init(void)
 	struct bt_hci_cp_write_ssp_mode *ssp_cp;
 	struct bt_hci_cp_write_inquiry_mode *inq_cp;
 	struct bt_hci_write_local_name *name_cp;
-	struct bt_hci_cp_write_class_of_device *cod;
+	struct bt_hci_rp_read_default_link_policy_settings *rp;
+	struct net_buf *rsp;
 	int err;
+	uint16_t default_link_policy_settings;
 
 	/* Read extended local features */
 	if (BT_FEAT_EXT_FEATURES(bt_dev.features)) {
@@ -805,7 +836,7 @@ int bt_br_init(void)
 	net_buf_unref(buf);
 
 	/* Set SSP mode */
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_SSP_MODE, sizeof(*ssp_cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -818,7 +849,7 @@ int bt_br_init(void)
 	}
 
 	/* Enable Inquiry results with RSSI or extended Inquiry */
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_INQUIRY_MODE, sizeof(*inq_cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -831,7 +862,7 @@ int bt_br_init(void)
 	}
 
 	/* Set local name */
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_LOCAL_NAME, sizeof(*name_cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -845,7 +876,7 @@ int bt_br_init(void)
 	}
 
 	/* Set Class of device */
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_CLASS_OF_DEVICE, sizeof(*cod));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -858,7 +889,7 @@ int bt_br_init(void)
 	}
 
 	/* Set page timeout*/
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_PAGE_TIMEOUT, sizeof(uint16_t));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -874,7 +905,7 @@ int bt_br_init(void)
 	if (BT_FEAT_SC(bt_dev.features)) {
 		struct bt_hci_cp_write_sc_host_supp *sc_cp;
 
-		buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_SC_HOST_SUPP, sizeof(*sc_cp));
+		buf = bt_hci_cmd_alloc(K_FOREVER);
 		if (!buf) {
 			return -ENOBUFS;
 		}
@@ -883,6 +914,38 @@ int bt_br_init(void)
 		sc_cp->sc_support = 0x01;
 
 		err = bt_hci_cmd_send_sync(BT_HCI_OP_WRITE_SC_HOST_SUPP, buf, NULL);
+		if (err) {
+			return err;
+		}
+	}
+
+	err = bt_hci_cmd_send_sync(BT_HCI_OP_READ_DEFAULT_LINK_POLICY_SETTINGS, NULL, &rsp);
+	if (err) {
+		return err;
+	}
+
+	rp = (void *)rsp->data;
+	default_link_policy_settings = rp->default_link_policy_settings;
+
+	bool should_enable = IS_ENABLED(CONFIG_BT_DEFAULT_ROLE_SWITCH_ENABLE);
+	bool is_enabled = (default_link_policy_settings &
+			   BT_HCI_LINK_POLICY_SETTINGS_ENABLE_ROLE_SWITCH);
+
+	/* Enable/Disable the default role switch */
+	if (should_enable != is_enabled) {
+		struct bt_hci_cp_write_default_link_policy_settings *policy_cp;
+
+		default_link_policy_settings ^= BT_HCI_LINK_POLICY_SETTINGS_ENABLE_ROLE_SWITCH;
+
+		buf = bt_hci_cmd_alloc(K_FOREVER);
+		if (!buf) {
+			return -ENOBUFS;
+		}
+
+		policy_cp = net_buf_add(buf, sizeof(*policy_cp));
+		policy_cp->default_link_policy_settings = default_link_policy_settings;
+
+		err = bt_hci_cmd_send_sync(BT_HCI_OP_WRITE_DEFAULT_LINK_POLICY_SETTINGS, buf, NULL);
 		if (err) {
 			return err;
 		}
@@ -897,7 +960,7 @@ static int br_start_inquiry(const struct bt_br_discovery_param *param)
 	struct bt_hci_op_inquiry *cp;
 	struct net_buf *buf;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_INQUIRY, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -982,11 +1045,11 @@ int bt_br_discovery_stop(void)
 
 		priv = &discovery_results[i]._priv;
 
-		if (!priv->resolving) {
+		if (priv->resolve_state != RESOLVE_REMOTE_NAME_RESOLVING) {
 			continue;
 		}
 
-		buf = bt_hci_cmd_create(BT_HCI_OP_REMOTE_NAME_CANCEL, sizeof(*cp));
+		buf = bt_hci_cmd_alloc(K_FOREVER);
 		if (!buf) {
 			continue;
 		}
@@ -1023,7 +1086,7 @@ static int write_scan_enable(uint8_t scan)
 
 	LOG_DBG("type %u", scan);
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_SCAN_ENABLE, 1);
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -1071,7 +1134,7 @@ static int bt_br_write_current_iac_lap(bool limited)
 
 	param_len = sizeof(*iac_lap) + (num_current_iac * sizeof(struct bt_hci_iac_lap));
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_CURRENT_IAC_LAP, param_len);
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -1123,8 +1186,7 @@ static int bt_br_write_cod(uint32_t cod)
 	struct net_buf *buf;
 
 	/* Set Class of device */
-	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_CLASS_OF_DEVICE,
-				sizeof(struct bt_hci_cp_write_class_of_device));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -1229,6 +1291,52 @@ int bt_br_set_discoverable(bool enable, bool limited)
 
 		atomic_clear_bit(bt_dev.flags, BT_DEV_LIMITED_DISCOVERABLE_MODE);
 		k_work_cancel_delayable(&bt_br_limited_discoverable_timeout);
+	}
+
+	return 0;
+}
+
+bool bt_br_bond_exists(const bt_addr_t *addr)
+{
+	struct bt_keys_link_key *key = bt_keys_find_link_key(addr);
+
+	/* if there are any keys stored then device is bonded */
+	return key != NULL;
+}
+
+static void unpair(const bt_addr_t *addr)
+{
+	struct bt_conn *conn = bt_conn_lookup_addr_br(addr);
+	struct bt_conn_auth_info_cb *listener, *next;
+
+	if (conn) {
+		bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		bt_conn_unref(conn);
+	}
+
+	bt_keys_link_key_clear_addr(addr);
+
+	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&bt_auth_info_cbs, listener,
+					  next, node) {
+		if (listener->br_bond_deleted) {
+			listener->br_bond_deleted(addr);
+		}
+	}
+}
+
+static void bt_br_unpair_remote(const struct bt_br_bond_info *info, void *data)
+{
+	ARG_UNUSED(data);
+
+	unpair(&info->addr);
+}
+
+int bt_br_unpair(const bt_addr_t *addr)
+{
+	if (!addr || bt_addr_eq(addr, BT_ADDR_ANY)) {
+		bt_br_foreach_bond(bt_br_unpair_remote, NULL);
+	} else {
+		unpair(addr);
 	}
 
 	return 0;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2021,2023-2024 NXP Semiconductor INC.
+ * Copyright 2021,2023-2025 NXP Semiconductor INC.
  * All rights reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -97,6 +97,7 @@ struct i2s_mcux_config {
 	uint32_t mclk_control_base;
 	uint32_t mclk_pin_mask;
 	uint32_t mclk_pin_offset;
+	bool mclk_output;
 	uint32_t tx_channel;
 	clock_control_subsys_t clk_sub_sys;
 	const struct device *ccm_dev;
@@ -155,7 +156,7 @@ static void i2s_tx_stream_disable(const struct device *dev, bool drop)
 	}
 
 	/* Disable the channel FIFO */
-	dev_cfg->base->TCR3 &= ~I2S_TCR3_TCE_MASK;
+	SAI_TxSetChannelFIFOMask(dev_cfg->base, 0);
 
 	/* Disable Tx */
 	SAI_TxEnable(dev_cfg->base, false);
@@ -181,7 +182,7 @@ static void i2s_rx_stream_disable(const struct device *dev, bool in_drop, bool o
 	dma_stop(dev_dma, strm->dma_channel);
 
 	/* Disable the channel FIFO */
-	dev_cfg->base->RCR3 &= ~I2S_RCR3_RCE_MASK;
+	SAI_RxSetChannelFIFOMask(dev_cfg->base, 0);
 
 	/* Disable DMA enable bit */
 	SAI_RxEnableDMA(dev_cfg->base, kSAI_FIFORequestDMAEnable, false);
@@ -456,6 +457,10 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 	int ret = -EINVAL;
 	uint32_t mclk;
 
+	if (dir == I2S_DIR_BOTH) {
+		return -ENOSYS;
+	}
+
 	if ((dev_data->tx.state != I2S_STATE_NOT_READY) &&
 	    (dev_data->tx.state != I2S_STATE_READY) &&
 	    (dev_data->rx.state != I2S_STATE_NOT_READY) &&
@@ -487,9 +492,7 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 
 	memset(&config, 0, sizeof(config));
 
-	const bool is_mclk_slave = i2s_cfg->options & I2S_OPT_BIT_CLK_SLAVE;
-
-	enable_mclk_direction(dev, !is_mclk_slave);
+	enable_mclk_direction(dev, dev_cfg->mclk_output);
 
 	get_mclk_rate(dev, &mclk);
 	LOG_DBG("mclk is %d", mclk);
@@ -610,11 +613,14 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 		LOG_DBG("tx slab buffer = 0x%x", (uint32_t)i2s_cfg->mem_slab->buffer);
 
 		config.fifo.fifoWatermark = (uint32_t)FSL_FEATURE_SAI_FIFO_COUNTn(base) - 1;
+#if defined(FSL_FEATURE_SAI_HAS_FIFO_COMBINE_MODE) && FSL_FEATURE_SAI_HAS_FIFO_COMBINE_MODE
+		config.fifo.fifoCombine = kSAI_FifoCombineModeEnabledOnWrite;
+#endif
 		/* set bit clock divider */
 		SAI_TxSetConfig(base, &config);
 		dev_data->tx.start_channel = config.startChannel;
 		/* Disable the channel FIFO */
-		base->TCR3 &= ~I2S_TCR3_TCE_MASK;
+		SAI_TxSetChannelFIFOMask(base, 0);
 		SAI_TxSetBitClockRate(base, mclk, i2s_cfg->frame_clk_freq, word_size_bits,
 				      i2s_cfg->channels);
 		LOG_DBG("tx start_channel = %d", dev_data->tx.start_channel);
@@ -628,6 +634,9 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 	} else {
 		/* For RX, DMA reads from FIFO whenever data present */
 		config.fifo.fifoWatermark = 0;
+#if defined(FSL_FEATURE_SAI_HAS_FIFO_COMBINE_MODE) && FSL_FEATURE_SAI_HAS_FIFO_COMBINE_MODE
+		config.fifo.fifoCombine = kSAI_RXFifoCombineModeEnabledOnRead;
+#endif
 
 		memcpy(&dev_data->rx.cfg, i2s_cfg, sizeof(struct i2s_config));
 		LOG_DBG("rx slab free_list = 0x%x", (uint32_t)i2s_cfg->mem_slab->free_list);
@@ -739,7 +748,7 @@ static int i2s_tx_stream_start(const struct device *dev)
 	SAI_TxEnableDMA(base, kSAI_FIFORequestDMAEnable, true);
 
 	/* Enable the channel FIFO */
-	base->TCR3 |= I2S_TCR3_TCE(1UL << strm->start_channel);
+	SAI_TxSetChannelFIFOMask(base, dev_cfg->tx_channel);
 
 	/* Enable SAI Tx clock */
 	SAI_TxEnable(base, true);
@@ -837,7 +846,7 @@ static int i2s_rx_stream_start(const struct device *dev)
 	SAI_RxEnableDMA(base, kSAI_FIFORequestDMAEnable, true);
 
 	/* Enable the channel FIFO */
-	base->RCR3 |= I2S_RCR3_RCE(1UL << strm->start_channel);
+	SAI_RxSetChannelFIFOMask(base, dev_cfg->tx_channel);
 
 	/* Enable SAI Rx clock */
 	SAI_RxEnable(base, true);
@@ -1070,7 +1079,7 @@ static void audio_clock_settings(const struct device *dev)
 	imxrt_audio_codec_pll_init(clock_name, dev_cfg->clk_src, dev_cfg->clk_pre_div,
 				   dev_cfg->clk_src_div);
 
-#ifdef CONFIG_SOC_SERIES_IMXRT11XX
+#if defined(CONFIG_SOC_SERIES_IMXRT11XX) || defined(CONFIG_SOC_SERIES_IMXRT118X)
 	audioPllConfig.loopDivider = dev_cfg->pll_lp;
 	audioPllConfig.postDivider = dev_cfg->pll_pd;
 	audioPllConfig.numerator = dev_cfg->pll_num;
@@ -1124,6 +1133,8 @@ static int i2s_mcux_initialize(const struct device *dev)
 
 	/*clock configuration*/
 	audio_clock_settings(dev);
+
+	enable_mclk_direction(dev, dev_cfg->mclk_output);
 
 	SAI_Init(base);
 
@@ -1185,6 +1196,7 @@ static DEVICE_API(i2s, i2s_mcux_driver_api) = {
 		.mclk_control_base = DT_REG_ADDR(DT_PHANDLE(DT_DRV_INST(i2s_id), pinmuxes)),       \
 		.mclk_pin_mask = DT_PHA_BY_IDX(DT_DRV_INST(i2s_id), pinmuxes, 0, mask),            \
 		.mclk_pin_offset = DT_PHA_BY_IDX(DT_DRV_INST(i2s_id), pinmuxes, 0, offset),        \
+		.mclk_output = DT_INST_PROP_OR(i2s_id, mclk_output, 0),                            \
 		.clk_sub_sys =                                                                     \
 			(clock_control_subsys_t)DT_INST_CLOCKS_CELL_BY_IDX(i2s_id, 0, name),       \
 		.ccm_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(i2s_id)),                             \

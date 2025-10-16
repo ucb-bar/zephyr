@@ -2793,6 +2793,55 @@ static void le_set_phy(struct net_buf *buf, struct net_buf **evt)
 	*evt = cmd_status(status);
 }
 #endif /* CONFIG_BT_CTLR_PHY */
+
+
+#if defined(CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING)
+
+#define PATH_LOSS_FACTOR_INVALID 0xFF
+static void le_path_loss_set_parameters(struct net_buf *buf, struct net_buf **evt)
+{
+	struct bt_hci_cp_le_set_path_loss_reporting_parameters *cmd = (void *)buf->data;
+	struct bt_hci_rp_le_set_path_loss_reporting_parameters *rp;
+
+	uint16_t handle = sys_le16_to_cpu(cmd->handle);
+	uint16_t min_time_spent = sys_le16_to_cpu(cmd->min_time_spent);
+
+	rp = hci_cmd_complete(evt, sizeof(*rp));
+	rp->handle = handle;
+
+	if (cmd->high_threshold + cmd->high_hysteresis > PATH_LOSS_FACTOR_INVALID ||
+	    cmd->low_threshold < cmd->low_hysteresis                              ||
+	    cmd->low_threshold > cmd->high_threshold                              ||
+	    cmd->low_threshold + cmd->low_hysteresis > cmd->high_threshold - cmd->high_hysteresis) {
+		rp->status = BT_HCI_ERR_INVALID_PARAM;
+		return;
+	}
+
+	rp->status = ll_conn_set_path_loss_parameters(handle, cmd->high_threshold,
+						      cmd->high_hysteresis, cmd->low_threshold,
+						      cmd->low_hysteresis, min_time_spent);
+}
+
+#define PATH_LOSS_ENABLED 0x01
+#define PATH_LOSS_DISABLED 0x00
+static void le_path_loss_enable(struct net_buf *buf, struct net_buf **evt)
+{
+	struct bt_hci_cp_le_set_path_loss_reporting_enable *cmd = (void *)buf->data;
+	struct bt_hci_rp_le_set_path_loss_reporting_enable *rp;
+
+	uint16_t handle = sys_le16_to_cpu(cmd->handle);
+
+	rp = hci_cmd_complete(evt, sizeof(*rp));
+	rp->handle = handle;
+
+	if (cmd->enable != PATH_LOSS_ENABLED &&
+	    cmd->enable != PATH_LOSS_DISABLED) {
+		rp->status = BT_HCI_ERR_INVALID_PARAM;
+	}
+
+	rp->status = ll_conn_set_path_loss_reporting(handle, cmd->enable);
+}
+#endif /* CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING */
 #endif /* CONFIG_BT_CONN */
 
 #if defined(CONFIG_BT_CTLR_PRIVACY)
@@ -4767,6 +4816,17 @@ static int controller_cmd_handle(uint16_t  ocf, struct net_buf *cmd,
 		le_set_phy(cmd, evt);
 		break;
 #endif /* CONFIG_BT_CTLR_PHY */
+
+#if defined(CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING)
+	case BT_OCF(BT_HCI_OP_LE_SET_PATH_LOSS_REPORTING_PARAMETERS):
+		le_path_loss_set_parameters(cmd, evt);
+		break;
+
+	case BT_OCF(BT_HCI_OP_LE_SET_PATH_LOSS_REPORTING_ENABLE):
+		le_path_loss_enable(cmd, evt);
+		break;
+
+#endif /* CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING */
 #endif /* CONFIG_BT_CONN */
 
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
@@ -5051,12 +5111,6 @@ static void vs_read_supported_commands(struct net_buf *buf,
 	/* Write Tx Power, Read Tx Power */
 	rp->commands[1] |= BIT(5) | BIT(6);
 #endif /* CONFIG_BT_CTLR_TX_PWR_DYNAMIC_CONTROL */
-#if defined(CONFIG_USB_DEVICE_BLUETOOTH_VS_H4)
-	/* Read Supported USB Transport Modes */
-	rp->commands[1] |= BIT(7);
-	/* Set USB Transport Mode */
-	rp->commands[2] |= BIT(0);
-#endif /* USB_DEVICE_BLUETOOTH_VS_H4 */
 }
 
 static void vs_read_supported_features(struct net_buf *buf,
@@ -5210,8 +5264,7 @@ static void vs_read_tx_power_level(struct net_buf *buf, struct net_buf **evt)
 
 #if defined(CONFIG_BT_HCI_VS_FATAL_ERROR)
 /* A memory pool for vandor specific events for fatal error reporting purposes. */
-NET_BUF_POOL_FIXED_DEFINE(vs_err_tx_pool, 1, BT_BUF_EVT_RX_SIZE,
-			  sizeof(struct bt_buf_data), NULL);
+NET_BUF_POOL_FIXED_DEFINE(vs_err_tx_pool, 1, BT_BUF_EVT_RX_SIZE, 0, NULL);
 
 /* The alias for convenience of Controller HCI implementation. Controller is build for
  * a particular architecture hence the alias will allow to avoid conditional compilation.
@@ -5244,8 +5297,7 @@ static struct net_buf *vs_err_evt_create(uint8_t subevt, uint8_t len)
 		struct bt_hci_evt_le_meta_event *me;
 		struct bt_hci_evt_hdr *hdr;
 
-		net_buf_reserve(buf, BT_BUF_RESERVE);
-		bt_buf_set_type(buf, BT_BUF_EVT);
+		net_buf_add_u8(buf, BT_HCI_H4_EVT);
 
 		hdr = net_buf_add(buf, sizeof(*hdr));
 		hdr->evt = BT_HCI_EVT_VENDOR;
@@ -5700,14 +5752,6 @@ int hci_vendor_cmd_handle_common(uint16_t ocf, struct net_buf *cmd,
 		vs_read_supported_features(cmd, evt);
 		break;
 
-#if defined(CONFIG_USB_DEVICE_BLUETOOTH_VS_H4)
-	case BT_OCF(BT_HCI_OP_VS_READ_USB_TRANSPORT_MODE):
-		break;
-	case BT_OCF(BT_HCI_OP_VS_SET_USB_TRANSPORT_MODE):
-		reset(cmd, evt);
-		break;
-#endif /* CONFIG_USB_DEVICE_BLUETOOTH_VS_H4 */
-
 	case BT_OCF(BT_HCI_OP_VS_READ_BUILD_INFO):
 		vs_read_build_info(cmd, evt);
 		break;
@@ -5917,7 +5961,6 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 	struct bt_hci_iso_sdu_hdr *iso_sdu_hdr;
 	struct isoal_sdu_tx sdu_frag_tx;
 	struct bt_hci_iso_hdr *iso_hdr;
-	uint32_t *time_stamp;
 	uint16_t handle;
 	uint8_t pb_flag;
 	uint8_t ts_flag;
@@ -5965,9 +6008,8 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 	sdu_frag_tx.cntr_time_stamp = HAL_TICKER_TICKS_TO_US(ticker_ticks_now_get());
 	if (ts_flag) {
 		/* Use HCI provided time stamp */
-		time_stamp = net_buf_pull_mem(buf, sizeof(*time_stamp));
-		len -= sizeof(*time_stamp);
-		sdu_frag_tx.time_stamp = sys_le32_to_cpu(*time_stamp);
+		sdu_frag_tx.time_stamp = net_buf_pull_le32(buf);
+		len -= sizeof(uint32_t);
 	} else {
 		/* Use controller's capture time */
 		sdu_frag_tx.time_stamp = sdu_frag_tx.cntr_time_stamp;
@@ -6007,6 +6049,7 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 		struct ll_conn_iso_group *cig;
 		struct ll_iso_stream_hdr *hdr;
 		struct ll_iso_datapath *dp_in;
+		uint32_t sdu_interval;
 		uint8_t event_offset;
 
 		cis = ll_iso_stream_connected_get(handle);
@@ -6017,23 +6060,35 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 		cig = cis->group;
 
 		/* We must ensure sufficient time for ISO-AL to fragment SDU and
-		 * deliver PDUs to the TX queue. By checking ull_ref_get, we
-		 * know if we are within the subevents of an ISO event. If so,
-		 * we can assume that we have enough time to deliver in the next
-		 * ISO event. If we're not active within the ISO event, we don't
-		 * know if there is enough time to deliver in the next event,
-		 * and for safety we set the target to current event + 2.
-		 *
-		 * For FT > 1, we have the opportunity to retransmit in later
+		 * deliver PDUs to the TX queue. We don't know if there is enough
+		 * time to deliver in the next event, and for safety we set the
+		 * target to current event + 2.
+		 */
+		event_offset = 2;
+
+		if (cig->lll.role) {
+			/* peripheral */
+			sdu_interval = cig->p_sdu_interval;
+		} else {
+			/* central */
+			sdu_interval = cig->c_sdu_interval;
+		}
+
+		/* By checking ull_ref_get, we know if we are within the subevents
+		 * of an ISO event. If so, we can assume that we have enough time
+		 * to deliver in the next ISO event, provided CIG sync delay is less
+		 * than an SDU interval
+		 */
+		if (ull_ref_get(&cig->ull) && cig->sync_delay < sdu_interval) {
+			event_offset -= 1;
+		}
+
+		/* For FT > 1, we have the opportunity to retransmit in later
 		 * event(s), in which case we have the option to target an
 		 * earlier event (this or next) because being late does not
 		 * instantly flush the payload.
 		 */
-
-		event_offset = ull_ref_get(&cig->ull) ? 1 : 2;
-
 		if (cis->lll.tx.ft > 1) {
-			/* FT > 1, target an earlier event */
 			event_offset -= 1;
 		}
 
@@ -6042,7 +6097,7 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 		uint64_t pkt_seq_num;
 
 		/* Catch up local pkt_seq_num with internal pkt_seq_num */
-		event_count = cis->lll.event_count + event_offset;
+		event_count = cis->lll.event_count_prepare + event_offset;
 		pkt_seq_num = event_count + 1U;
 
 		/* If pb_flag is BT_ISO_START (0b00) or BT_ISO_SINGLE (0b10)
@@ -6085,7 +6140,7 @@ int hci_iso_handle(struct net_buf *buf, struct net_buf **evt)
 						   ISO_INT_UNIT_US));
 
 #else /* !CONFIG_BT_CTLR_ISOAL_PSN_IGNORE */
-		sdu_frag_tx.target_event = cis->lll.event_count + event_offset;
+		sdu_frag_tx.target_event = cis->lll.event_count_prepare + event_offset;
 		sdu_frag_tx.grp_ref_point =
 			isoal_get_wrapped_time_us(cig->cig_ref_point,
 						  (event_offset *
@@ -8650,6 +8705,28 @@ static void le_req_peer_sca_complete(struct pdu_data *pdu, uint16_t handle,
 	sep->sca = scau->sca;
 }
 #endif /* CONFIG_BT_CTLR_SCA_UPDATE */
+#if defined(CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING)
+static void le_path_loss_threshold(struct pdu_data *pdu,
+				   uint16_t handle,
+				   struct net_buf *buf)
+{
+	struct bt_hci_evt_le_path_loss_threshold *sep;
+	struct node_rx_path_loss *pl_pdu;
+
+	pl_pdu = (void *)pdu;
+
+	if (!(event_mask & BT_EVT_MASK_LE_META_EVENT) ||
+	    !(le_event_mask & BT_EVT_MASK_LE_PATH_LOSS_THRESHOLD)) {
+		return;
+	}
+
+	sep = meta_evt(buf, BT_HCI_EVT_LE_PATH_LOSS_THRESHOLD, sizeof(*sep));
+
+	sep->handle = sys_cpu_to_le16(handle);
+	sep->current_path_loss = pl_pdu->current_path_loss;
+	sep->zone_entered      = pl_pdu->zone_entered;
+}
+#endif /* CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING */
 #endif /* CONFIG_BT_CONN */
 
 #if defined(CONFIG_BT_HCI_MESH_EXT)
@@ -8780,6 +8857,15 @@ static void encode_control(struct node_rx_pdu *node_rx,
 
 	case NODE_RX_TYPE_TERMINATE:
 		hci_disconn_complete_encode(pdu_data, handle, buf);
+
+#if !defined(CONFIG_BT_CTLR_RX_PRIO_STACK_SIZE)
+		/* Similar to the design of processing the termination when using Rx priority
+		 * thread, we process the termination event to handle Controller to Host data
+		 * flowcontrol in the Controller here.
+		 */
+		hci_disconn_complete_process(handle);
+#endif /* CONFIG_BT_CTLR_RX_PRIO_STACK_SIZE */
+
 		break;
 
 	case NODE_RX_TYPE_CONN_UPDATE:
@@ -8843,6 +8929,12 @@ static void encode_control(struct node_rx_pdu *node_rx,
 #endif /* CONFIG_BT_CTLR_DF_VS_CONN_IQ_REPORT_16_BITS_IQ_SAMPLES */
 		return;
 #endif /* CONFIG_BT_CTLR_DF_CONN_CTE_RX */
+
+#if defined(CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING)
+	case NODE_RX_TYPE_PATH_LOSS:
+		le_path_loss_threshold(pdu_data, handle, buf);
+		return;
+#endif /* CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING */
 #endif /* CONFIG_BT_CONN */
 
 #if defined(CONFIG_BT_CTLR_ADV_INDICATION)
@@ -9328,6 +9420,10 @@ uint8_t hci_get_class(struct node_rx_pdu *node_rx)
 #endif /* CONFIG_BT_CTLR_PHY */
 
 			return HCI_CLASS_EVT_CONNECTION;
+#if defined(CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING)
+		case NODE_RX_TYPE_PATH_LOSS:
+			return HCI_CLASS_EVT_REQUIRED;
+#endif /* CONFIG_BT_CTLR_LE_PATH_LOSS_MONITORING */
 #endif /* CONFIG_BT_CONN */
 
 #if defined(CONFIG_BT_CTLR_SYNC_ISO) || defined(CONFIG_BT_CTLR_CONN_ISO)

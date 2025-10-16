@@ -70,6 +70,20 @@ schema;scenario-schema:
     "extra_sections":
       type: any
       required: false
+    "expect_reboot":
+      type: bool
+      required: false
+    "required_applications":
+      type: seq
+      required: false
+      sequence:
+        - type: map
+          mapping:
+            "name":
+              type: str
+              required: true
+            "platform":
+              type: str
     "required_snippets":
       type: seq
       required: false
@@ -107,6 +121,9 @@ schema;scenario-schema:
       type: map
       required: false
       mapping:
+        "power_measurements":
+          type: any
+          required: false
         "shell_commands_file":
           type: str
           required: false
@@ -121,6 +138,9 @@ schema;scenario-schema:
                   required: true
                 "expected":
                   type: str
+        "display_capture_config":
+          type: str
+          required: false
         "type":
           type: str
           required: false
@@ -179,6 +199,15 @@ schema;scenario-schema:
                 - type: str
         "bsim_exe_name":
           type: str
+          required: false
+        "ztest_suite_repeat":
+          type: int
+          required: false
+        "ztest_test_repeat":
+          type: int
+          required: false
+        "ztest_test_shuffle":
+          type: bool
           required: false
     "min_ram":
       type: int

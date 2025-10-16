@@ -7,8 +7,6 @@
 #ifndef MOCKS_CCP_CALL_CONTROL_CLIENT_H_
 #define MOCKS_CCP_CALL_CONTROL_CLIENT_H_
 
-#include <stdint.h>
-
 #include <zephyr/bluetooth/audio/ccp.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/fff.h>
@@ -21,5 +19,7 @@ void mock_ccp_call_control_client_cleanup(void);
 DECLARE_FAKE_VOID_FUNC(mock_ccp_call_control_client_discover_cb,
 		       struct bt_ccp_call_control_client *, int,
 		       struct bt_ccp_call_control_client_bearers *);
+DECLARE_FAKE_VOID_FUNC(mock_ccp_call_control_client_bearer_provider_name_cb,
+		       struct bt_ccp_call_control_client_bearer *, int, const char *);
 
 #endif /* MOCKS_CCP_CALL_CONTROL_CLIENT_H_ */

@@ -235,7 +235,7 @@ BUILD_ASSERT(sizeof(long_payload) - 1 > CONFIG_HTTP_SERVER_CLIENT_BUFFER_SIZE,
 
 static uint16_t test_http_service_port = SERVER_PORT;
 HTTP_SERVICE_DEFINE(test_http_service, SERVER_IPV4_ADDR,
-		    &test_http_service_port, 1, 10, NULL, NULL);
+		    &test_http_service_port, 1, 10, NULL, NULL, NULL);
 
 static const char static_resource_payload[] = TEST_STATIC_PAYLOAD;
 struct http_resource_detail_static static_resource_detail = {
@@ -1431,6 +1431,8 @@ static void test_http1_header_capture_common(const char *request)
 	zassert_not_equal(ret, -1, "send() failed (%d)", errno);
 
 	test_read_data(&offset, sizeof(http1_header_capture_common_response) - 1);
+	zassert_mem_equal(buf, http1_header_capture_common_response,
+			  sizeof(http1_header_capture_common_response) - 1);
 }
 
 ZTEST(server_function_tests, test_http1_header_capture)

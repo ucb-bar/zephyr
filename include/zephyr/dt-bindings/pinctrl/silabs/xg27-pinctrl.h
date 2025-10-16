@@ -11,7 +11,7 @@
 #ifndef ZEPHYR_DT_BINDINGS_PINCTRL_SILABS_XG27_PINCTRL_H_
 #define ZEPHYR_DT_BINDINGS_PINCTRL_SILABS_XG27_PINCTRL_H_
 
-#include <dt-bindings/pinctrl/silabs-pinctrl-dbus.h>
+#include <zephyr/dt-bindings/pinctrl/silabs-pinctrl-dbus.h>
 
 #define SILABS_DBUS_ACMP0_ACMPOUT(port, pin) SILABS_DBUS(port, pin, 4, 1, 0, 1)
 
@@ -126,6 +126,17 @@
 #define SILABS_DBUS_USART1_CLK(port, pin) SILABS_DBUS(port, pin, 133, 1, 3, 5)
 #define SILABS_DBUS_USART1_TX(port, pin)  SILABS_DBUS(port, pin, 133, 1, 4, 6)
 #define SILABS_DBUS_USART1_CTS(port, pin) SILABS_DBUS(port, pin, 133, 0, 0, 2)
+
+#define GPIO_SWCLKTCK_PA1   SILABS_FIXED_ROUTE(0x0, 0x1, 0, 0)
+#define GPIO_SWDIOTMS_PA2   SILABS_FIXED_ROUTE(0x0, 0x2, 0, 1)
+#define GPIO_TDO_PA3        SILABS_FIXED_ROUTE(0x0, 0x3, 0, 2)
+#define GPIO_TDI_PA4        SILABS_FIXED_ROUTE(0x0, 0x4, 0, 3)
+#define GPIO_SWV_PA3        SILABS_FIXED_ROUTE(0x0, 0x3, 1, 0)
+#define GPIO_TRACECLK_PA4   SILABS_FIXED_ROUTE(0x0, 0x4, 1, 1)
+#define GPIO_TRACEDATA0_PA3 SILABS_FIXED_ROUTE(0x0, 0x3, 1, 2)
+#define GPIO_TRACEDATA1_PA5 SILABS_FIXED_ROUTE(0x0, 0x5, 1, 3)
+#define GPIO_TRACEDATA2_PA6 SILABS_FIXED_ROUTE(0x0, 0x6, 1, 4)
+#define GPIO_TRACEDATA3_PA7 SILABS_FIXED_ROUTE(0x0, 0x7, 1, 5)
 
 #define ACMP0_ACMPOUT_PA0 SILABS_DBUS_ACMP0_ACMPOUT(0x0, 0x0)
 #define ACMP0_ACMPOUT_PA1 SILABS_DBUS_ACMP0_ACMPOUT(0x0, 0x1)

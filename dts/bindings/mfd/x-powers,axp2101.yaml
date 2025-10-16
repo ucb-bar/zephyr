@@ -7,6 +7,13 @@ compatible: "x-powers,axp2101"
 
 include: i2c-device.yaml
 
+bus: axp2101
+
 properties:
   reg:
     required: true
+
+  int-gpios:
+    type: phandle-array
+    description: |
+      Interrupt GPIO from the AXP2101 device

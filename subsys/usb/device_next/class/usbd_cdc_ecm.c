@@ -106,7 +106,8 @@ static uint8_t cdc_ecm_get_int_in(struct usbd_class_data *const c_data)
 	struct cdc_ecm_eth_data *data = dev->data;
 	struct usbd_cdc_ecm_desc *desc = data->desc;
 
-	if (usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
+	if (USBD_SUPPORTS_HIGH_SPEED &&
+	    usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
 		return desc->if0_hs_int_ep.bEndpointAddress;
 	}
 
@@ -120,7 +121,8 @@ static uint8_t cdc_ecm_get_bulk_in(struct usbd_class_data *const c_data)
 	struct cdc_ecm_eth_data *data = dev->data;
 	struct usbd_cdc_ecm_desc *desc = data->desc;
 
-	if (usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
+	if (USBD_SUPPORTS_HIGH_SPEED &&
+	    usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
 		return desc->if1_1_hs_in_ep.bEndpointAddress;
 	}
 
@@ -131,7 +133,8 @@ static uint16_t cdc_ecm_get_bulk_in_mps(struct usbd_class_data *const c_data)
 {
 	struct usbd_context *uds_ctx = usbd_class_get_ctx(c_data);
 
-	if (usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
+	if (USBD_SUPPORTS_HIGH_SPEED &&
+	    usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
 		return 512U;
 	}
 
@@ -145,7 +148,8 @@ static uint8_t cdc_ecm_get_bulk_out(struct usbd_class_data *const c_data)
 	struct cdc_ecm_eth_data *data = dev->data;
 	struct usbd_cdc_ecm_desc *desc = data->desc;
 
-	if (usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
+	if (USBD_SUPPORTS_HIGH_SPEED &&
+	    usbd_bus_speed(uds_ctx) == USBD_SPEED_HS) {
 		return desc->if1_1_hs_out_ep.bEndpointAddress;
 	}
 
@@ -398,6 +402,7 @@ static void usbd_cdc_ecm_disable(struct usbd_class_data *const c_data)
 	const struct device *dev = usbd_class_get_private(c_data);
 	struct cdc_ecm_eth_data *data = dev->data;
 
+	atomic_clear_bit(&data->state, CDC_ECM_DATA_IFACE_ENABLED);
 	atomic_clear_bit(&data->state, CDC_ECM_CLASS_SUSPENDED);
 	LOG_INF("Disabled %s", c_data->name);
 }
@@ -450,10 +455,12 @@ static int usbd_cdc_ecm_init(struct usbd_class_data *const c_data)
 	desc->if0_union.bSubordinateInterface0 = if_num + 1;
 	LOG_DBG("CDC ECM class initialized");
 
-	if (usbd_add_descriptor(uds_ctx, data->mac_desc_data)) {
-		LOG_ERR("Failed to add iMACAddress string descriptor");
-	} else {
-		desc->if0_ecm.iMACAddress = usbd_str_desc_get_idx(data->mac_desc_data);
+	if (desc->if0_ecm.iMACAddress == 0) {
+		if (usbd_add_descriptor(uds_ctx, data->mac_desc_data)) {
+			LOG_ERR("Failed to add iMACAddress string descriptor");
+		} else {
+			desc->if0_ecm.iMACAddress = usbd_str_desc_get_idx(data->mac_desc_data);
+		}
 	}
 
 	return 0;
@@ -475,7 +482,7 @@ static void *usbd_cdc_ecm_get_desc(struct usbd_class_data *const c_data,
 	const struct device *dev = usbd_class_get_private(c_data);
 	struct cdc_ecm_eth_data *const data = dev->data;
 
-	if (speed == USBD_SPEED_HS) {
+	if (USBD_SUPPORTS_HIGH_SPEED && speed == USBD_SPEED_HS) {
 		return data->hs_desc;
 	}
 
@@ -488,6 +495,8 @@ static int cdc_ecm_send(const struct device *dev, struct net_pkt *const pkt)
 	struct usbd_class_data *c_data = data->c_data;
 	size_t len = net_pkt_get_len(pkt);
 	struct net_buf *buf;
+	uint8_t ep;
+	int ret;
 
 	if (len > NET_ETH_MAX_FRAME_SIZE) {
 		LOG_WRN("Trying to send too large packet, drop");
@@ -500,7 +509,8 @@ static int cdc_ecm_send(const struct device *dev, struct net_pkt *const pkt)
 		return -EACCES;
 	}
 
-	buf = cdc_ecm_buf_alloc(cdc_ecm_get_bulk_in(c_data));
+	ep = cdc_ecm_get_bulk_in(c_data);
+	buf = cdc_ecm_buf_alloc(ep);
 	if (buf == NULL) {
 		LOG_ERR("Failed to allocate buffer");
 		return -ENOMEM;
@@ -519,7 +529,13 @@ static int cdc_ecm_send(const struct device *dev, struct net_pkt *const pkt)
 		udc_ep_buf_set_zlp(buf);
 	}
 
-	usbd_ep_enqueue(c_data, buf);
+	ret = usbd_ep_enqueue(c_data, buf);
+	if (ret) {
+		LOG_ERR("Failed to enqueue net_buf for 0x%02x", ep);
+		net_buf_unref(buf);
+		return ret;
+	}
+
 	k_sem_take(&data->sync_sem, K_FOREVER);
 	net_buf_unref(buf);
 
@@ -542,18 +558,11 @@ static int cdc_ecm_set_config(const struct device *dev,
 	return -ENOTSUP;
 }
 
-static int cdc_ecm_get_config(const struct device *dev,
-			      enum ethernet_config_type type,
-			      struct ethernet_config *config)
-{
-	return -ENOTSUP;
-}
-
 static enum ethernet_hw_caps cdc_ecm_get_capabilities(const struct device *dev)
 {
 	ARG_UNUSED(dev);
 
-	return ETHERNET_LINK_10BASE_T;
+	return ETHERNET_LINK_10BASE;
 }
 
 static int cdc_ecm_iface_start(const struct device *dev)
@@ -635,7 +644,6 @@ static struct usbd_class_api usbd_cdc_ecm_api = {
 
 static const struct ethernet_api cdc_ecm_eth_api = {
 	.iface_api.init = cdc_ecm_iface_init,
-	.get_config = cdc_ecm_get_config,
 	.set_config = cdc_ecm_set_config,
 	.get_capabilities = cdc_ecm_get_capabilities,
 	.send = cdc_ecm_send,

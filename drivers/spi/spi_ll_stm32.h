@@ -24,6 +24,9 @@ struct spi_stm32_config {
 	const struct pinctrl_dev_config *pcfg;
 #ifdef CONFIG_SPI_STM32_INTERRUPT
 	irq_config_func_t irq_config;
+#ifdef CONFIG_SOC_SERIES_STM32H7X
+	uint32_t irq_line;
+#endif /* CONFIG_SOC_SERIES_STM32H7X */
 #endif
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
 	bool use_subghzspi_nss;
@@ -34,7 +37,8 @@ struct spi_stm32_config {
 #endif
 	size_t pclk_len;
 	const struct stm32_pclken *pclken;
-	bool fifo_enabled;
+	bool fifo_enabled: 1;
+	bool ioswp: 1;
 };
 
 #ifdef CONFIG_SPI_STM32_DMA

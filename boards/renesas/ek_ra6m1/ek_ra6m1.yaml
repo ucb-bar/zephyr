@@ -11,4 +11,7 @@ supported:
   - gpio
   - uart
   - usbd
+  - watchdog
+  - counter
+  - crc
 vendor: renesas

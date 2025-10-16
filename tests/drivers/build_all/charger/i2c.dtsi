@@ -5,7 +5,8 @@
 
 /****************************************
  * PLEASE KEEP REG ADDRESSES SEQUENTIAL *
- ***************************************/
+ **************************************
+ */
 
 bq24190@0 {
 	compatible = "ti,bq24190";
@@ -45,4 +46,24 @@ bq25180@2 {
 sbs-charger@3 {
 	compatible = "sbs,sbs-charger";
 	reg = <0x3>;
+};
+
+bq257130@4 {
+	compatible = "ti,bq25713";
+	reg = <0x4>;
+	constant-charge-current-max-microamp = <1000000>;
+	constant-charge-voltage-max-microvolt = <3800000>;
+	system-voltage-min-threshold-microvolt = <3328000>;
+};
+
+axp2101@5 {
+	compatible = "x-powers,axp2101";
+	reg = <0x5>;
+
+	charger {
+		compatible = "x-powers,axp2101-charger";
+		constant-charge-current-max-microamp = <300000>;
+		constant-charge-voltage-max-microvolt = <4200000>;
+		charge-term-current-microamp = <100000>;
+	};
 };

@@ -26,7 +26,7 @@
 #include <zephyr/net/ethernet_vlan.h>
 #include <zephyr/net/ptp_time.h>
 
-#if defined(CONFIG_NET_DSA)
+#if defined(CONFIG_NET_DSA_DEPRECATED)
 #include <zephyr/net/dsa.h>
 #endif
 
@@ -128,17 +128,15 @@ struct net_eth_addr {
 #endif
 
 #define _NET_ETH_MAX_FRAME_SIZE	(NET_ETH_MTU + _NET_ETH_MAX_HDR_SIZE)
-/*
- * Extend the max frame size for DSA (KSZ8794) by one byte (to 1519) to
- * store tail tag.
- */
-#if defined(CONFIG_NET_DSA)
+
+#if defined(CONFIG_DSA_TAG_SIZE)
+#define DSA_TAG_SIZE CONFIG_DSA_TAG_SIZE
+#else
+#define DSA_TAG_SIZE 0
+#endif
+
 #define NET_ETH_MAX_FRAME_SIZE (_NET_ETH_MAX_FRAME_SIZE + DSA_TAG_SIZE)
 #define NET_ETH_MAX_HDR_SIZE (_NET_ETH_MAX_HDR_SIZE + DSA_TAG_SIZE)
-#else
-#define NET_ETH_MAX_FRAME_SIZE (_NET_ETH_MAX_FRAME_SIZE)
-#define NET_ETH_MAX_HDR_SIZE (_NET_ETH_MAX_HDR_SIZE)
-#endif
 
 #define NET_ETH_VLAN_HDR_SIZE	4
 
@@ -155,20 +153,20 @@ enum ethernet_hw_caps {
 	/** VLAN supported */
 	ETHERNET_HW_VLAN		= BIT(2),
 
-	/** Enabling/disabling auto negotiation supported */
-	ETHERNET_AUTO_NEGOTIATION_SET	= BIT(3),
-
 	/** 10 Mbits link supported */
-	ETHERNET_LINK_10BASE_T		= BIT(4),
+	ETHERNET_LINK_10BASE		= BIT(3),
 
 	/** 100 Mbits link supported */
-	ETHERNET_LINK_100BASE_T		= BIT(5),
+	ETHERNET_LINK_100BASE		= BIT(4),
 
 	/** 1 Gbits link supported */
-	ETHERNET_LINK_1000BASE_T	= BIT(6),
+	ETHERNET_LINK_1000BASE		= BIT(5),
 
-	/** Changing duplex (half/full) supported */
-	ETHERNET_DUPLEX_SET		= BIT(7),
+	/** 2.5 Gbits link supported */
+	ETHERNET_LINK_2500BASE		= BIT(6),
+
+	/** 5 Gbits link supported */
+	ETHERNET_LINK_5000BASE		= BIT(7),
 
 	/** IEEE 802.1AS (gPTP) clock supported */
 	ETHERNET_PTP			= BIT(8),
@@ -191,11 +189,11 @@ enum ethernet_hw_caps {
 	/** VLAN Tag stripping */
 	ETHERNET_HW_VLAN_TAG_STRIP	= BIT(14),
 
-	/** DSA switch slave port */
-	ETHERNET_DSA_SLAVE_PORT		= BIT(15),
+	/** DSA switch user port */
+	ETHERNET_DSA_USER_PORT		= BIT(15),
 
-	/** DSA switch master port */
-	ETHERNET_DSA_MASTER_PORT	= BIT(16),
+	/** DSA switch conduit port */
+	ETHERNET_DSA_CONDUIT_PORT	= BIT(16),
 
 	/** IEEE 802.1Qbv (scheduled traffic) supported */
 	ETHERNET_QBV			= BIT(17),
@@ -208,20 +206,21 @@ enum ethernet_hw_caps {
 
 	/** TX-Injection supported */
 	ETHERNET_TXINJECTION_MODE	= BIT(20),
-
-	/** 2.5 Gbits link supported */
-	ETHERNET_LINK_2500BASE_T	= BIT(21),
-
-	/** 5 Gbits link supported */
-	ETHERNET_LINK_5000BASE_T	= BIT(22),
 };
 
 /** @cond INTERNAL_HIDDEN */
 
+#if !defined(CONFIG_NET_DSA_DEPRECATED)
+enum dsa_port_type {
+	NON_DSA_PORT,
+	DSA_CONDUIT_PORT,
+	DSA_USER_PORT,
+	DSA_CPU_PORT,
+	DSA_PORT,
+};
+#endif
+
 enum ethernet_config_type {
-	ETHERNET_CONFIG_TYPE_AUTO_NEG,
-	ETHERNET_CONFIG_TYPE_LINK,
-	ETHERNET_CONFIG_TYPE_DUPLEX,
 	ETHERNET_CONFIG_TYPE_MAC_ADDRESS,
 	ETHERNET_CONFIG_TYPE_QAV_PARAM,
 	ETHERNET_CONFIG_TYPE_QBV_PARAM,
@@ -505,16 +504,8 @@ enum ethernet_checksum_support {
 
 struct ethernet_config {
 	union {
-		bool auto_negotiation;
-		bool full_duplex;
 		bool promisc_mode;
 		bool txinjection_mode;
-
-		struct {
-			bool link_10bt;
-			bool link_100bt;
-			bool link_1000bt;
-		} l;
 
 		struct net_eth_addr mac_address;
 
@@ -702,7 +693,7 @@ struct ethernet_context {
 	int port;
 #endif
 
-#if defined(CONFIG_NET_DSA)
+#if defined(CONFIG_NET_DSA_DEPRECATED)
 	/** DSA RX callback function - for custom processing - like e.g.
 	 * redirecting packets when MAC address is caught
 	 */
@@ -716,6 +707,13 @@ struct ethernet_context {
 
 	/** Send a network packet via DSA master port */
 	dsa_send_t dsa_send;
+
+#elif defined(CONFIG_NET_DSA)
+	/** DSA port tpye */
+	enum dsa_port_type dsa_port;
+
+	/** DSA switch context pointer */
+	void *dsa_switch_ctx;
 #endif
 
 	/** Is network carrier up */
@@ -953,12 +951,21 @@ enum ethernet_hw_caps net_eth_get_hw_capabilities(struct net_if *iface)
 {
 	const struct device *dev = net_if_get_device(iface);
 	const struct ethernet_api *api = (struct ethernet_api *)dev->api;
+	enum ethernet_hw_caps caps = (enum ethernet_hw_caps)0;
+#if defined(CONFIG_NET_DSA) && !defined(CONFIG_NET_DSA_DEPRECATED)
+	struct ethernet_context *eth_ctx = net_if_l2_data(iface);
 
-	if (!api || !api->get_capabilities) {
-		return (enum ethernet_hw_caps)0;
+	if (eth_ctx->dsa_port == DSA_CONDUIT_PORT) {
+		caps |= ETHERNET_DSA_CONDUIT_PORT;
+	} else if (eth_ctx->dsa_port == DSA_USER_PORT) {
+		caps |= ETHERNET_DSA_USER_PORT;
+	}
+#endif
+	if (api == NULL || api->get_capabilities == NULL) {
+		return caps;
 	}
 
-	return api->get_capabilities(dev);
+	return (enum ethernet_hw_caps)(caps | api->get_capabilities(dev));
 }
 
 /**

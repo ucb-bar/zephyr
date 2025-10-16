@@ -76,14 +76,17 @@ if("${IAR_TOOLCHAIN_VARIANT}" STREQUAL "iccarm")
   list(APPEND IAR_COMMON_FLAGS
     --endian=little
     --cpu=${ICCARM_CPU}
-    -DRTT_USE_ASM=0       #WA for VAAK-232
-    --diag_suppress=Ta184  # Using zero sized arrays except for as last member of a struct is discouraged and dereferencing elements in such an array has undefined behavior
+    -DRTT_USE_ASM=0        # WA for VAAK-232
+    --diag_suppress=Ta184  # Using zero sized arrays except for as last
+                           # member of a struct is discouraged and
+                           # dereferencing elements in such an array has
+                           # undefined behavior
   )
 endif()
 
 # Enable VLA if CONFIG_MISRA_SANE is not set and warnings are not enabled.
 if(NOT CONFIG_MISRA_SANE AND NOT DEFINED W)
-  list(APPEND IAR_COMMON_FLAGS --vla)
+  list(APPEND IAR_COMMON_FLAGS $<$<COMPILE_LANGUAGE:C>:--vla>)
 endif()
 
 # Minimal ASM compiler flags
@@ -119,11 +122,21 @@ if("${IAR_TOOLCHAIN_VARIANT}" STREQUAL "iccarm")
     if(CONFIG_FPU)
       list(APPEND IAR_COMMON_FLAGS --fpu=${ICCARM_FPU})
       list(APPEND IAR_ASM_FLAGS -mfpu=${GCC_M_FPU})
+      if(CONFIG_DCLS AND NOT CONFIG_FP_HARDABI)
+        # If the processor is equipped with VFP and configured in DCLS topology,
+        # the FP "hard" ABI must be used in order to facilitate the FP register
+        # initialisation and synchronisation.
+        set(FORCE_FP_HARDABI TRUE)
+      endif()
+
+      if(CONFIG_FP_HARDABI OR FORCE_FP_HARDABI)
+        list(APPEND IAR_ASM_FLAGS -mfloat-abi=hard)
+      elseif(CONFIG_FP_SOFTABI)
+        list(APPEND ARM_ASM_FLAGS -mfloat-abi=softfp)
+      endif()
     endif()
   endif()
-endif()
 
-if("${IAR_TOOLCHAIN_VARIANT}" STREQUAL "iccarm")
   if(CONFIG_IAR_LIBC)
     # Zephyr requires AEABI portability to ensure correct functioning of the C
     # library, for example error numbers, errno.h.

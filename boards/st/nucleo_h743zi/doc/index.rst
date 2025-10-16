@@ -43,6 +43,16 @@ Key Features
 
 More information about the board can be found at the `Nucleo H743ZI website`_.
 
+NUCLEO-H743ZI Board - Obsolescence Notice
+=========================================
+
+**Important Notice:** The NUCLEO-H743ZI development board is now **OBSOLETE** and
+no longer recommended for new designs or developments.
+STMicroelectronics has officially discontinued this product.
+As a result, we strongly advise all users to transition to the recommended replacement
+board: **NUCLEO-H753ZI**.
+For more information, please refer to the official STMicroelectronics product page `Nucleo H743ZI website`_.
+
 Hardware
 ********
 
@@ -130,6 +140,8 @@ Requires an external CAN or CANFD transceiver.
 
 Programming and Debugging
 *************************
+
+.. zephyr:board-supported-runners::
 
 Nucleo H743ZI board includes an ST-LINK/V2-1 embedded debug tool interface.
 

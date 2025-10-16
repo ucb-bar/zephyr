@@ -125,6 +125,8 @@ the remaining are not used/tested.
 Programming and Debugging
 *************************
 
+.. zephyr:board-supported-runners::
+
 The Colibri iMX7D doesn't have QSPI flash for the M4 and it needs to be started by
 the A7 core. The A7 core is responsible to load the M4 binary application into the
 RAM, put the M4 in reset, set the M4 Program Counter and Stack Pointer, and get
@@ -302,7 +304,7 @@ from its currently loaded dtb file.
    };
 
    #Add these definitions under / { } just before the __symbols__
-   #Disgard the comments with #-->
+   #Discard the comments with #-->
    reserved-memory {
       #address-cells = <0x01>;
       #size-cells = <0x01>;

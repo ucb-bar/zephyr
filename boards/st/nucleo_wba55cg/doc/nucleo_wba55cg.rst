@@ -146,8 +146,8 @@ Supported Features
 
 .. zephyr:board-supported-hw::
 
-Bluetooh support
-----------------
+Bluetooth support
+-----------------
 
 BLE support is enabled on nucleo_wba55cg. To build a zephyr sample using this board
 you first need to install Bluetooth Controller libraries available in Zephyr as binary
@@ -195,6 +195,8 @@ Default settings are 115500 8N1.
 
 Programming and Debugging
 *************************
+
+.. zephyr:board-supported-runners::
 
 Nucleo WBA55CG board includes an ST-LINK/V3 embedded debug tool interface.
 It could be used for flash and debug using either OpenOCD or STM32Cube ecosystem tools.

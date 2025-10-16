@@ -393,8 +393,10 @@ void ztest_skip_failed_assumption(void)
 {
 	if (IS_ENABLED(CONFIG_ZTEST_FAIL_ON_ASSUME)) {
 		current_test_failed_assumption = true;
+		ztest_test_fail();
+	} else {
+		ztest_test_skip();
 	}
-	ztest_test_skip();
 }
 
 #ifndef KERNEL
@@ -536,7 +538,7 @@ out:
 	ret = get_final_test_result(test, ret);
 	Z_TC_END_RESULT(ret, test->name);
 	if (ret == TC_SKIP && current_test_failed_assumption) {
-		test_status = 1;
+		test_status = ZTEST_STATUS_HAS_FAILURE;
 	}
 
 	return ret;
@@ -602,6 +604,7 @@ void ztest_test_pass(void)
 		if (cur_phase == TEST_PHASE_BEFORE) {
 			test_finalize();
 		}
+		break;
 	}
 }
 EXPORT_SYMBOL(ztest_test_pass);
@@ -738,7 +741,7 @@ static int run_test(struct ztest_suite_node *suite, struct ztest_unit_test *test
 	ret = get_final_test_result(test, ret);
 	Z_TC_END_RESULT(ret, test->name);
 	if (ret == TC_SKIP && current_test_failed_assumption) {
-		test_status = 1;
+		test_status = ZTEST_STATUS_HAS_FAILURE;
 	}
 
 	return ret;
@@ -1165,7 +1168,7 @@ void ztest_verify_all_test_suites_ran(void)
 		if (test->stats->fail_count + test->stats->pass_count + test->stats->skip_count !=
 		    test->stats->run_count) {
 			PRINT_DATA("Bad stats for %s.%s\n", test->test_suite_name, test->name);
-			test_status = 1;
+			test_status = ZTEST_STATUS_HAS_FAILURE;
 		}
 	}
 }

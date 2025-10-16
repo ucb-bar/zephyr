@@ -18,6 +18,8 @@ LOG_MODULE_REGISTER(nsos_sockets);
 
 #include <soc.h>
 #include <string.h>
+#include <zephyr/net/conn_mgr_connectivity.h>
+#include <zephyr/net/conn_mgr_connectivity_impl.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/offloaded_netdev.h>
@@ -59,6 +61,9 @@ struct nsos_socket {
 };
 
 static sys_dlist_t nsos_polls = SYS_DLIST_STATIC_INIT(&nsos_polls);
+
+/* Forward declaration of the interface */
+NET_IF_DECLARE(nsos_socket, 0);
 
 static int socket_family_to_nsos_mid(int family, int *family_mid)
 {
@@ -677,7 +682,7 @@ static int nsos_connect_blocking(struct nsos_socket *sock,
 			goto clear_nonblock;
 		}
 
-		ret = so_err;
+		ret = -nsi_errno_to_mid(so_err);
 	}
 
 clear_nonblock:
@@ -691,6 +696,7 @@ clear_nonblock:
 
 static int nsos_connect(void *obj, const struct sockaddr *addr, socklen_t addrlen)
 {
+	struct net_if *iface = NET_IF_GET(nsos_socket, 0);
 	struct nsos_socket *sock = obj;
 	struct nsos_mid_sockaddr_storage addr_storage_mid;
 	struct nsos_mid_sockaddr *addr_mid = (struct nsos_mid_sockaddr *)&addr_storage_mid;
@@ -716,6 +722,7 @@ return_ret:
 		errno = nsi_errno_from_mid(-ret);
 		return -1;
 	}
+	conn_mgr_if_used(iface);
 
 	return ret;
 }
@@ -736,6 +743,7 @@ static int nsos_listen(void *obj, int backlog)
 
 static int nsos_accept(void *obj, struct sockaddr *addr, socklen_t *addrlen)
 {
+	struct net_if *iface = NET_IF_GET(nsos_socket, 0);
 	struct nsos_socket *accept_sock = obj;
 	struct nsos_mid_sockaddr_storage addr_storage_mid;
 	struct nsos_mid_sockaddr *addr_mid = (struct nsos_mid_sockaddr *)&addr_storage_mid;
@@ -780,6 +788,7 @@ static int nsos_accept(void *obj, struct sockaddr *addr, socklen_t *addrlen)
 
 	zvfs_finalize_typed_fd(zephyr_fd, conn_sock, &nsos_socket_fd_op_vtable.fd_vtable,
 			       ZVFS_MODE_IFSOCK);
+	conn_mgr_if_used(iface);
 
 	return zephyr_fd;
 
@@ -797,6 +806,7 @@ return_ret:
 static ssize_t nsos_sendto(void *obj, const void *buf, size_t len, int flags,
 			   const struct sockaddr *addr, socklen_t addrlen)
 {
+	struct net_if *iface = NET_IF_GET(nsos_socket, 0);
 	struct nsos_socket *sock = obj;
 	struct nsos_mid_sockaddr_storage addr_storage_mid;
 	struct nsos_mid_sockaddr *addr_mid = (struct nsos_mid_sockaddr *)&addr_storage_mid;
@@ -830,11 +840,13 @@ return_ret:
 		return -1;
 	}
 
+	conn_mgr_if_used(iface);
 	return ret;
 }
 
 static ssize_t nsos_sendmsg(void *obj, const struct msghdr *msg, int flags)
 {
+	struct net_if *iface = NET_IF_GET(nsos_socket, 0);
 	struct nsos_socket *sock = obj;
 	struct nsos_mid_sockaddr_storage addr_storage_mid;
 	struct nsos_mid_sockaddr *addr_mid = (struct nsos_mid_sockaddr *)&addr_storage_mid;
@@ -891,12 +903,14 @@ return_ret:
 		return -1;
 	}
 
+	conn_mgr_if_used(iface);
 	return ret;
 }
 
 static ssize_t nsos_recvfrom(void *obj, void *buf, size_t len, int flags,
 			     struct sockaddr *addr, socklen_t *addrlen)
 {
+	struct net_if *iface = NET_IF_GET(nsos_socket, 0);
 	struct nsos_socket *sock = obj;
 	struct nsos_mid_sockaddr_storage addr_storage_mid;
 	struct nsos_mid_sockaddr *addr_mid = (struct nsos_mid_sockaddr *)&addr_storage_mid;
@@ -930,6 +944,7 @@ return_ret:
 		return -1;
 	}
 
+	conn_mgr_if_used(iface);
 	return ret;
 }
 
@@ -1490,6 +1505,7 @@ static int nsos_getaddrinfo(const char *node, const char *service,
 			    const struct zsock_addrinfo *hints,
 			    struct zsock_addrinfo **res)
 {
+	struct net_if *iface = NET_IF_GET(nsos_socket, 0);
 	struct nsos_mid_addrinfo hints_mid;
 	struct nsos_mid_addrinfo *res_mid;
 	int system_errno;
@@ -1523,6 +1539,7 @@ static int nsos_getaddrinfo(const char *node, const char *service,
 		errno = -ret;
 		return DNS_EAI_SYSTEM;
 	}
+	conn_mgr_if_used(iface);
 
 	return ret;
 }
@@ -1591,3 +1608,116 @@ NET_DEVICE_OFFLOAD_INIT(nsos_socket, "nsos_socket",
 			NULL,
 			NULL, NULL,
 			0, &nsos_iface_offload_api, NET_ETH_MTU);
+
+#ifdef CONFIG_NET_NATIVE_OFFLOADED_SOCKETS_CONNECTIVITY_SIM
+
+struct nsos_conn_data {
+	struct k_work_delayable work;
+	struct net_if *iface;
+	k_timeout_t connect_delay;
+};
+
+#define NSOS_NET_IF_CTX_TYPE struct nsos_conn_data
+
+static void nsos_delayed_connect_fn(struct k_work *work)
+{
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct nsos_conn_data *data = CONTAINER_OF(dwork, struct nsos_conn_data, work);
+
+	LOG_INF("NSOS: active");
+	net_if_dormant_off(data->iface);
+}
+
+static void nsos_net_if_init(struct conn_mgr_conn_binding *binding)
+{
+	struct nsos_conn_data *data = binding->ctx;
+
+	LOG_DBG("");
+
+	/* Setup connection worker */
+	k_work_init_delayable(&data->work, nsos_delayed_connect_fn);
+	data->iface = binding->iface;
+
+	/* Set default auto connect state */
+	if (!IS_ENABLED(CONFIG_NET_NATIVE_OFFLOADED_SOCKETS_CONNECTIVITY_SIM_AUTO_CONNECT)) {
+		conn_mgr_binding_set_flag(binding, CONN_MGR_IF_NO_AUTO_CONNECT, true);
+	}
+
+	/* Default delay */
+	data->connect_delay = K_SECONDS(1);
+
+	/* Mark the interface as dormant */
+	net_if_dormant_on(binding->iface);
+}
+
+static int nsos_net_connect(struct conn_mgr_conn_binding *const binding)
+{
+	struct nsos_conn_data *data = binding->ctx;
+
+	LOG_INF("NSOS: connecting");
+	k_work_reschedule(&data->work, data->connect_delay);
+	return 0;
+}
+
+static int nsos_net_if_disconnect(struct conn_mgr_conn_binding *const binding)
+{
+	struct nsos_conn_data *data = binding->ctx;
+
+	LOG_INF("NSOS: dormant");
+	k_work_cancel_delayable(&data->work);
+	net_if_dormant_on(binding->iface);
+
+	if (conn_mgr_binding_get_flag(binding, CONN_MGR_IF_PERSISTENT) &&
+	    !conn_mgr_binding_get_flag(binding, CONN_MGR_IF_DISCONNECTING)) {
+		/* Interface marked as persistent, application didn't request the disconnect */
+		LOG_INF("NSOS: reconnecting");
+		k_work_reschedule(&data->work, data->connect_delay);
+	}
+
+	return 0;
+}
+
+int nsos_net_if_get_opt(struct conn_mgr_conn_binding *const binding, int optname,
+			void *optval, size_t *optlen)
+{
+	struct nsos_conn_data *data = binding->ctx;
+
+	if (optname != 0) {
+		return -EINVAL;
+	}
+	if (*optlen < sizeof(k_timeout_t)) {
+		return -EINVAL;
+	}
+	memcpy(optval, &data->connect_delay, sizeof(data->connect_delay));
+	*optlen = sizeof(data->connect_delay);
+	return 0;
+}
+
+int nsos_net_if_set_opt(struct conn_mgr_conn_binding *const binding, int optname,
+			const void *optval, size_t optlen)
+{
+	struct nsos_conn_data *data = binding->ctx;
+	const k_timeout_t *opt = optval;
+
+	if (optname != 0) {
+		return -EINVAL;
+	}
+	if (optlen != sizeof(k_timeout_t)) {
+		return -EINVAL;
+	}
+	data->connect_delay = *opt;
+	return 0;
+}
+
+static struct conn_mgr_conn_api nsos_conn_mgr_api = {
+	.init = nsos_net_if_init,
+	.connect = nsos_net_connect,
+	.disconnect = nsos_net_if_disconnect,
+	.get_opt = nsos_net_if_get_opt,
+	.set_opt = nsos_net_if_set_opt,
+};
+
+CONN_MGR_CONN_DEFINE(NSOS_NET_IF, &nsos_conn_mgr_api);
+CONN_MGR_BIND_CONN(nsos_socket, NSOS_NET_IF);
+
+#endif /* CONFIG_NET_NATIVE_OFFLOADED_SOCKETS_CONNECTIVITY_SIM */
