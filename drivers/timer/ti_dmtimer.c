@@ -13,13 +13,17 @@
 #include <zephyr/kernel.h>
 #include <zephyr/spinlock.h>
 
-#include <zephyr/drivers/timer/ti_dmtimer.h>
+#include "ti_dmtimer.h"
 
 #define DT_DRV_COMPAT ti_am654_timer
 
 #define TIMER_IRQ_NUM   DT_INST_IRQN(0)
 #define TIMER_IRQ_PRIO  DT_INST_IRQ(0, priority)
 #define TIMER_IRQ_FLAGS DT_INST_IRQ(0, flags)
+
+#if defined(CONFIG_TEST)
+const int32_t z_sys_timer_irq_for_test = TIMER_IRQ_NUM;
+#endif
 
 #define CYC_PER_TICK ((uint32_t)(sys_clock_hw_cycles_per_sec() / CONFIG_SYS_CLOCK_TICKS_PER_SEC))
 
@@ -153,7 +157,7 @@ static int sys_clock_driver_init(void)
 {
 	struct ti_dm_timer_data *data;
 
-	systick_timer_dev = DEVICE_DT_GET(DT_NODELABEL(systick_timer));
+	systick_timer_dev = DEVICE_DT_GET(DT_DRV_INST(0));
 
 	data = systick_timer_dev->data;
 

@@ -147,7 +147,8 @@ uint8_t ll_big_sync_create(uint8_t big_handle, uint16_t sync_handle,
 	}
 
 	/* Check if free BISes available */
-	if (mem_free_count_get(stream_free) < num_bis) {
+	if ((num_bis > BT_CTLR_SYNC_ISO_STREAM_MAX) ||
+	    (mem_free_count_get(stream_free) < num_bis)) {
 		return BT_HCI_ERR_INSUFFICIENT_RESOURCES;
 	}
 
@@ -184,6 +185,7 @@ uint8_t ll_big_sync_create(uint8_t big_handle, uint16_t sync_handle,
 
 	/* Initialize sync LLL context */
 	lll = &sync_iso->lll;
+	lll->lazy_prepare = 0U;
 	lll->latency_prepare = 0U;
 	lll->latency_event = 0U;
 	lll->window_widening_prepare_us = 0U;
@@ -487,24 +489,27 @@ void ull_sync_iso_setup(struct ll_sync_iso_set *sync_iso,
 	lll->irc = PDU_BIG_INFO_IRC_GET(bi);
 	if (lll->pto) {
 		uint8_t nse;
+		uint8_t ptc;
 
 		nse = lll->irc * lll->bn; /* 4 bits * 3 bits, total 7 bits */
 		if (nse >= lll->nse) {
 			return;
 		}
 
-		lll->ptc = lll->nse - nse;
+		ptc = lll->nse - nse;
 
 		/* FIXME: Do not remember why ptc is 4 bits, it should be 5 bits as ptc is a
 		 *        running buffer offset related to nse.
 		 *        Fix ptc and ptc_curr definitions, until then we keep an assertion check
 		 *        here.
 		 */
-		LL_ASSERT(lll->ptc <= BIT_MASK(4));
+		LL_ASSERT(ptc <= BIT_MASK(4));
+		lll->ptc = ptc;
 	} else {
 		lll->ptc = 0U;
 	}
 	lll->sdu_interval = PDU_BIG_INFO_SDU_INTERVAL_GET(bi);
+	lll->max_sdu = PDU_BIG_INFO_MAX_SDU_GET(bi);
 
 	/* Pick the 39-bit payload count, 1 MSb is framing bit */
 	lll->payload_count = (uint64_t)bi->payload_count_framing[0];
@@ -580,10 +585,17 @@ void ull_sync_iso_setup(struct ll_sync_iso_set *sync_iso,
 	sync_iso_offset_us += PDU_BIG_INFO_OFFS_GET(bi) *
 			      lll->window_size_event_us;
 	/* Skip to first selected BIS subevent */
-	/* FIXME: add support for interleaved packing */
 	stream = ull_sync_iso_stream_get(lll->stream_handle[0]);
-	sync_iso_offset_us += (stream->bis_index - 1U) * lll->sub_interval *
-			      ((lll->irc * lll->bn) + lll->ptc);
+	LL_ASSERT(stream);
+
+	if (lll->bis_spacing >= (lll->sub_interval * lll->nse)) {
+		sync_iso_offset_us += (stream->bis_index - 1U) *
+				      lll->sub_interval *
+				      ((lll->irc * lll->bn) + lll->ptc);
+	} else {
+		sync_iso_offset_us += (stream->bis_index - 1U) *
+				      lll->bis_spacing;
+	}
 	sync_iso_offset_us -= PDU_AC_US(pdu->len, sync_iso->sync->lll.phy,
 					ftr->phy_flags);
 	sync_iso_offset_us -= EVENT_TICKER_RES_MARGIN_US;
@@ -651,16 +663,9 @@ void ull_sync_iso_setup(struct ll_sync_iso_set *sync_iso,
 		slot_us += EVENT_OVERHEAD_START_US + EVENT_OVERHEAD_END_US;
 	}
 
-	/* TODO: active_to_start feature port */
-	sync_iso->ull.ticks_active_to_start = 0U;
-	sync_iso->ull.ticks_prepare_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
-	sync_iso->ull.ticks_preempt_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 	sync_iso->ull.ticks_slot = HAL_TICKER_US_TO_TICKS_CEIL(slot_us);
 
-	ticks_slot_offset = MAX(sync_iso->ull.ticks_active_to_start,
-				sync_iso->ull.ticks_prepare_to_start);
+	ticks_slot_offset = HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
 	if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT)) {
 		ticks_slot_overhead = ticks_slot_offset;
 	} else {
@@ -762,11 +767,6 @@ void ull_sync_iso_done(struct node_rx_event_done *done)
 
 	/* Events elapsed used in timeout checks below */
 	latency_event = lll->latency_event;
-	if (lll->latency_prepare) {
-		elapsed_event = latency_event + lll->latency_prepare;
-	} else {
-		elapsed_event = latency_event + 1U;
-	}
 
 	/* Check for establishmet failure */
 	if (done->extra.estab_failed) {
@@ -799,6 +799,8 @@ void ull_sync_iso_done(struct node_rx_event_done *done)
 			sync_iso->timeout_expire = sync_iso->timeout_reload;
 		}
 	}
+
+	elapsed_event = lll->lazy_prepare + 1U;
 
 	/* check timeout */
 	force = 0U;

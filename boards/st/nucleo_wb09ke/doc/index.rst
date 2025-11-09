@@ -32,8 +32,8 @@ Supported Features
 
 .. zephyr:board-supported-hw::
 
-Bluetooh support
-----------------
+Bluetooth support
+-----------------
 
 BLE support is enabled; however, to build a Zephyr sample using this board,
 you first need to fetch the Bluetooth controller library into Zephyr as a binary BLOB.
@@ -62,6 +62,8 @@ For more details, please refer to the `Nucleo WB09KE board User Manual`_.
 
 Programming and Debugging
 *************************
+
+.. zephyr:board-supported-runners::
 
 Nucleo WB09KE board includes an ST-LINK-V3EC embedded debug tool interface.
 
@@ -118,6 +120,15 @@ You can debug an application in the usual way.  Here is an example for the
    :board: nucleo_wb09ke
    :maybe-skip-config:
    :goals: debug
+
+.. warning::
+   Application debugging on this board uses the pyOCD runner, which requires an additional pack
+   to be installed beforehand. This can be performed using the following commands:
+
+   .. code-block:: console
+
+      $ pyocd pack update
+      $ pyocd pack install stm32wb0
 
 .. _`Nucleo WB09KE webpage`:
    https://www.st.com/en/evaluation-tools/nucleo-wb09ke.html

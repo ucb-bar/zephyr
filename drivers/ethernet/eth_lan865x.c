@@ -112,7 +112,7 @@ static void lan865x_iface_init(struct net_if *iface)
 static enum ethernet_hw_caps lan865x_port_get_capabilities(const struct device *dev)
 {
 	ARG_UNUSED(dev);
-	return ETHERNET_LINK_10BASE_T | ETHERNET_PROMISC_MODE;
+	return ETHERNET_LINK_10BASE | ETHERNET_PROMISC_MODE;
 }
 
 static int lan865x_gpio_reset(const struct device *dev);
@@ -453,16 +453,24 @@ static int lan865x_port_send(const struct device *dev, struct net_pkt *pkt)
 	return 0;
 }
 
+const struct device *lan865x_get_phy(const struct device *dev)
+{
+	const struct lan865x_config *cfg = dev->config;
+
+	return cfg->phy;
+}
+
 static const struct ethernet_api lan865x_api_func = {
 	.iface_api.init = lan865x_iface_init,
 	.get_capabilities = lan865x_port_get_capabilities,
 	.set_config = lan865x_set_config,
 	.send = lan865x_port_send,
+	.get_phy = lan865x_get_phy,
 };
 
 #define LAN865X_DEFINE(inst)                                                                       \
 	static const struct lan865x_config lan865x_config_##inst = {                               \
-		.spi = SPI_DT_SPEC_INST_GET(inst, SPI_WORD_SET(8), 0),                             \
+		.spi = SPI_DT_SPEC_INST_GET(inst, SPI_WORD_SET(8)),                                \
 		.interrupt = GPIO_DT_SPEC_INST_GET(inst, int_gpios),                               \
 		.reset = GPIO_DT_SPEC_INST_GET(inst, rst_gpios),                                   \
 		.timeout = CONFIG_ETH_LAN865X_TIMEOUT,                                             \
@@ -472,13 +480,13 @@ static const struct ethernet_api lan865x_api_func = {
 	struct oa_tc6 oa_tc6_##inst = {                                                            \
 		.cps = 64, .protected = 0, .spi = &lan865x_config_##inst.spi};                     \
 	static struct lan865x_data lan865x_data_##inst = {                                         \
-		.mac_address = DT_INST_PROP(inst, local_mac_address),                              \
+		.mac_address = DT_INST_PROP_OR(inst, local_mac_address, {0}),                      \
 		.tx_rx_sem = Z_SEM_INITIALIZER((lan865x_data_##inst).tx_rx_sem, 1, 1),             \
 		.int_sem = Z_SEM_INITIALIZER((lan865x_data_##inst).int_sem, 0, 1),                 \
 		.tc6 = &oa_tc6_##inst};                                                            \
                                                                                                    \
 	ETH_NET_DEVICE_DT_INST_DEFINE(inst, lan865x_init, NULL, &lan865x_data_##inst,              \
-				      &lan865x_config_##inst, CONFIG_ETH_INIT_PRIORITY,            \
+				      &lan865x_config_##inst, CONFIG_ETH_LAN865X_INIT_PRIORITY,    \
 				      &lan865x_api_func, NET_ETH_MTU);
 
 DT_INST_FOREACH_STATUS_OKAY(LAN865X_DEFINE);

@@ -856,7 +856,7 @@ uint8_t ll_adv_aux_sr_data_set(uint8_t handle, uint8_t op, uint8_t frag_pref,
 		hdr_add_fields = 0U;
 
 		/* Add ADI if support enabled */
-		if (IS_ENABLED(CONFIG_BT_CTRL_ADV_ADI_IN_SCAN_RSP)) {
+		if (IS_ENABLED(CONFIG_BT_CTLR_ADV_ADI_IN_SCAN_RSP)) {
 			/* We need to get reference to ADI in auxiliary PDU */
 			hdr_add_fields |= ULL_ADV_PDU_HDR_FIELD_ADI;
 
@@ -886,7 +886,7 @@ uint8_t ll_adv_aux_sr_data_set(uint8_t handle, uint8_t op, uint8_t frag_pref,
 			goto sr_data_set_did_update;
 		}
 
-		if (IS_ENABLED(CONFIG_BT_CTRL_ADV_ADI_IN_SCAN_RSP)) {
+		if (IS_ENABLED(CONFIG_BT_CTLR_ADV_ADI_IN_SCAN_RSP)) {
 			(void)memcpy(&adi,
 				     &hdr_data[ULL_ADV_HDR_DATA_ADI_PTR_OFFSET],
 				     sizeof(struct pdu_adv_adi *));
@@ -2521,17 +2521,10 @@ uint32_t ull_adv_aux_evt_init(struct ll_adv_aux_set *aux,
 
 	time_us = aux_time_min_get(aux);
 
-	/* TODO: active_to_start feature port */
-	aux->ull.ticks_active_to_start = 0;
-	aux->ull.ticks_prepare_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
-	aux->ull.ticks_preempt_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 	aux->ull.ticks_slot = HAL_TICKER_US_TO_TICKS_CEIL(time_us);
 
 	if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT)) {
-		ticks_slot_overhead = MAX(aux->ull.ticks_active_to_start,
-					  aux->ull.ticks_prepare_to_start);
+		ticks_slot_overhead = HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
 	} else {
 		ticks_slot_overhead = 0;
 	}
@@ -2701,6 +2694,9 @@ struct ll_adv_aux_set *ull_adv_aux_acquire(struct lll_adv *lll)
 	lll_adv_data_reset(&lll_aux->data);
 	err = lll_adv_aux_data_init(&lll_aux->data);
 	if (err) {
+		lll->aux = NULL;
+		aux_release(aux);
+
 		return NULL;
 	}
 
@@ -3328,9 +3324,8 @@ static void mfy_aux_offset_get(void *param)
 	/* Assertion check for delayed aux_offset calculations */
 	ticks_now = ticker_ticks_now_get();
 	ticks_elapsed = ticker_ticks_diff_get(ticks_now, ticks_current);
-	ticks_to_start = MAX(adv->ull.ticks_active_to_start,
-			     adv->ull.ticks_prepare_to_start) -
-			 adv->ull.ticks_preempt_to_start;
+	ticks_to_start = HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US) -
+			 HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 	LL_ASSERT(ticks_elapsed < ticks_to_start);
 }
 

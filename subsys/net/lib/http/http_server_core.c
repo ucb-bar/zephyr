@@ -44,7 +44,6 @@ LOG_MODULE_REGISTER(net_http_server, CONFIG_NET_HTTP_SERVER_LOG_LEVEL);
 #define HTTP_SERVER_SOCK_COUNT (1 + HTTP_SERVER_MAX_SERVICES + HTTP_SERVER_MAX_CLIENTS)
 
 struct http_server_ctx {
-	int num_clients;
 	int listen_fds; /* max value of 1 + MAX_SERVICES */
 
 	/* First pollfd is eventfd that can be used to stop the server,
@@ -157,7 +156,11 @@ int http_server_init(struct http_server_ctx *ctx)
 			proto = IPPROTO_TCP;
 		}
 
-		fd = zsock_socket(af, SOCK_STREAM, proto);
+		if (svc->config != NULL && svc->config->socket_create != NULL) {
+			fd = svc->config->socket_create(svc, af, proto);
+		} else {
+			fd = zsock_socket(af, SOCK_STREAM, proto);
+		}
 		if (fd < 0) {
 			LOG_ERR("socket: %d", errno);
 			failed++;
@@ -228,7 +231,8 @@ int http_server_init(struct http_server_ctx *ctx)
 			*svc->port = ntohs(addr.addr4->sin_port);
 		}
 
-		if (zsock_listen(fd, HTTP_SERVER_MAX_CLIENTS) < 0) {
+		svc->data->num_clients = 0;
+		if (zsock_listen(fd, svc->backlog) < 0) {
 			LOG_ERR("listen: %d", errno);
 			failed++;
 			zsock_close(fd);
@@ -252,7 +256,6 @@ int http_server_init(struct http_server_ctx *ctx)
 	}
 
 	ctx->listen_fds = count;
-	ctx->num_clients = 0;
 
 	return 0;
 }
@@ -273,8 +276,9 @@ static int accept_new_client(int server_fd)
 		return new_socket;
 	}
 
-	LOG_DBG("New client from %s:%d",
-		net_sprint_addr(sa.ss_family, &net_sin((struct sockaddr *)&sa)->sin_addr),
+	const char * const addrstr =
+		net_sprint_addr(sa.ss_family, &net_sin((struct sockaddr *)&sa)->sin_addr);
+	LOG_DBG("New client from %s:%d", addrstr != NULL ? addrstr : "<unknown>",
 		ntohs(net_sin((struct sockaddr *)&sa)->sin_port));
 
 	return new_socket;
@@ -356,8 +360,14 @@ void http_server_release_client(struct http_client_ctx *client)
 	k_work_cancel_delayable_sync(&client->inactivity_timer, &sync);
 	client_release_resources(client);
 
-	server_ctx.num_clients--;
+	client->service->data->num_clients--;
 
+	for (i = 0; i < server_ctx.listen_fds; i++) {
+		if (server_ctx.fds[i].fd == *client->service->fd) {
+			server_ctx.fds[i].events = ZSOCK_POLLIN;
+			break;
+		}
+	}
 	for (i = server_ctx.listen_fds; i < ARRAY_SIZE(server_ctx.fds); i++) {
 		if (server_ctx.fds[i].fd == client->fd) {
 			server_ctx.fds[i].fd = INVALID_SOCK;
@@ -373,9 +383,11 @@ static void close_client_connection(struct http_client_ctx *client)
 {
 	int fd = client->fd;
 
-	http_server_release_client(client);
+	if (fd >= 0) {
+		http_server_release_client(client);
 
-	(void)zsock_close(fd);
+		(void)zsock_close(fd);
+	}
 }
 
 static void client_timeout(struct k_work *work)
@@ -613,15 +625,20 @@ static int http_server_run(struct http_server_ctx *ctx)
 
 			/* First check if we have something to accept */
 			if (i < ctx->listen_fds) {
+				service = lookup_service(ctx->fds[i].fd);
+				__ASSERT(NULL != service, "fd not associated with a service");
+
+				if (service->data->num_clients >= service->concurrent) {
+					ctx->fds[i].events = 0;
+					continue;
+				}
+
 				new_socket = accept_new_client(ctx->fds[i].fd);
 				if (new_socket < 0) {
 					ret = -errno;
 					LOG_DBG("accept: %d", ret);
 					continue;
 				}
-
-				service = lookup_service(ctx->fds[i].fd);
-				__ASSERT(NULL != service, "fd not associated with a service");
 
 				found_slot = false;
 
@@ -634,7 +651,7 @@ static int http_server_run(struct http_server_ctx *ctx)
 					ctx->fds[j].events = ZSOCK_POLLIN;
 					ctx->fds[j].revents = 0;
 
-					ctx->num_clients++;
+					service->data->num_clients++;
 
 					LOG_DBG("Init client #%d", j - ctx->listen_fds);
 
@@ -790,11 +807,10 @@ int http_server_find_file(char *fname, size_t fname_size, size_t *file_size,
 			  uint8_t supported_compression, enum http_compression *chosen_compression)
 {
 	struct fs_dirent dirent;
-	size_t len;
 	int ret;
 
-	len = strlen(fname);
 	if (IS_ENABLED(CONFIG_HTTP_SERVER_COMPRESSION)) {
+		const size_t len = strlen(fname);
 		*chosen_compression = HTTP_NONE;
 		if (IS_BIT_SET(supported_compression, HTTP_BR)) {
 			snprintk(fname + len, fname_size - len, ".br");
@@ -836,6 +852,8 @@ int http_server_find_file(char *fname, size_t fname_size, size_t *file_size,
 				goto return_filename;
 			}
 		}
+		/* No compressed file found, try the original filename */
+		fname[len] = '\0';
 	}
 	ret = fs_stat(fname, &dirent);
 	if (ret != 0) {

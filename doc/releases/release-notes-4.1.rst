@@ -70,10 +70,8 @@ The following sections provide detailed lists of changes by component.
 
 Security Vulnerability Related
 ******************************
-The following CVEs are addressed by this release:
 
-More detailed information can be found in:
-https://docs.zephyrproject.org/latest/security/vulnerabilities.html
+The following CVEs are addressed by this release:
 
 * :cve:`2025-1673` `Zephyr project bug tracker GHSA-jjhx-rrh4-j8mx
   <https://github.com/zephyrproject-rtos/zephyr/security/advisories/GHSA-jjhx-rrh4-j8mx>`_
@@ -83,6 +81,9 @@ https://docs.zephyrproject.org/latest/security/vulnerabilities.html
 
 * :cve:`2025-1675` `Zephyr project bug tracker GHSA-2m84-5hfw-m8v4
   <https://github.com/zephyrproject-rtos/zephyr/security/advisories/GHSA-2m84-5hfw-m8v4>`_
+
+More detailed information can be found in:
+https://docs.zephyrproject.org/latest/security/vulnerabilities.html
 
 API Changes
 ***********
@@ -436,7 +437,7 @@ New Boards
 
 * Nordic Semiconductor
 
-   * :zephyr:board:`nrf54l09pdk` (``nrf54l09pdk``)
+   * nRF54L09 PDK (``nrf54l09pdk``)
 
 * Norik Systems
 
@@ -445,7 +446,7 @@ New Boards
 
 * Panasonic Corporation
 
-   * :zephyr:board:`panb511evb` (``panb511evb``)
+   * PAN B511 Evaluation Board (``panb511evb``)
 
 * Peregrine Consultoria e Servicos
 
@@ -941,7 +942,7 @@ New Samples
 * :zephyr:code-sample:`bluetooth_ccp_call_control_client`
 * :zephyr:code-sample:`bluetooth_ccp_call_control_server`
 * :zephyr:code-sample:`coresight_stm_sample`
-* :zephyr:code-sample:`dfu-next`
+* :zephyr:code-sample:`usb-dfu`
 * :zephyr:code-sample:`i2c-rtio-loopback`
 * :zephyr:code-sample:`lvgl-screen-transparency`
 * :zephyr:code-sample:`mctp_endpoint_sample`
@@ -956,8 +957,8 @@ New Samples
 * :zephyr:code-sample:`tmc50xx`
 * :zephyr:code-sample:`uart`
 * :zephyr:code-sample:`usb-midi2-device`
-* :zephyr:code-sample:`usbd-cdc-acm-console`
-* :zephyr:code-sample:`webusb-next`
+* :zephyr:code-sample:`usb-cdc-acm-console`
+* :zephyr:code-sample:`webusb`
 
 Other notable changes
 *********************

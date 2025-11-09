@@ -222,7 +222,7 @@ static int get_sh_gpio(const struct shell *sh, char **argv, struct sh_gpio *gpio
 	return 0;
 }
 
-static int cmd_gpio_conf(const struct shell *sh, size_t argc, char **argv, void *data)
+static int cmd_gpio_conf(const struct shell *sh, size_t argc, char **argv)
 {
 	gpio_flags_t flags = 0;
 	gpio_flags_t vendor_specific;
@@ -488,14 +488,11 @@ static const char *gpio_device_name(const struct device *dev)
 
 static void device_name_get(size_t idx, struct shell_static_entry *entry)
 {
-	const struct device *dev = gpio_list[idx].dev;
-
 	if (idx >= ARRAY_SIZE(gpio_list)) {
 		entry->syntax = NULL;
 		return;
 	}
-
-	entry->syntax = gpio_device_name(dev);
+	entry->syntax = gpio_device_name(gpio_list[idx].dev);
 	entry->handler = NULL;
 	entry->help = "Device";
 	entry->subcmd = gpio_list[idx].subcmd;
@@ -645,35 +642,31 @@ static int cmd_gpio_info(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-SHELL_STATIC_SUBCMD_SET_CREATE(sub_gpio,
-	SHELL_CMD_ARG(conf, &sub_gpio_dev,
-		"Configure GPIO pin\n"
-		"Usage: gpio conf <device> <pin> <configuration <i|o>[u|d][h|l][0|1]> [vendor specific]\n"
-		"<i|o> - input|output\n"
-		"[u|d] - pull up|pull down, otherwise open\n"
-		"[h|l] - active high|active low, otherwise defaults to active high\n"
-		"[0|1] - initialise to logic 0|logic 1, otherwise defaults to logic 0\n"
-		"[vendor specific] - configuration flags within the mask 0xFF00\n"
-		"                    see include/zephyr/dt-bindings/gpio/",
+SHELL_STATIC_SUBCMD_SET_CREATE(
+	sub_gpio,
+	SHELL_CMD_ARG(
+		conf, &sub_gpio_dev,
+		SHELL_HELP("Configure GPIO pin",
+			   "<device> <pin> <configuration <i|o>[u|d][h|l][0|1]> [vendor specific]\n"
+			   "<i|o> - input|output\n"
+			   "[u|d] - pull up|pull down, otherwise open\n"
+			   "[h|l] - active high|active low, otherwise defaults to active high\n"
+			   "[0|1] - initialise to logic 0|logic 1, otherwise defaults to logic 0\n"
+			   "[vendor specific] - configuration flags within the mask 0xFF00\n"
+			   "                    see include/zephyr/dt-bindings/gpio/"),
 		cmd_gpio_conf, 4, 1),
-	SHELL_CMD_ARG(get, &sub_gpio_dev,
-		"Get GPIO pin value\n"
-		"Usage: gpio get <device> <pin>", cmd_gpio_get, 3, 0),
+	SHELL_CMD_ARG(get, &sub_gpio_dev, SHELL_HELP("Get GPIO pin value", "<device> <pin>"),
+		      cmd_gpio_get, 3, 0),
 	SHELL_CMD_ARG(set, &sub_gpio_dev,
-		"Set GPIO pin value\n"
-		"Usage: gpio set <device> <pin> <level 0|1>", cmd_gpio_set, 4, 0),
+		      SHELL_HELP("Set GPIO pin value", "<device> <pin> <level 0|1>"), cmd_gpio_set,
+		      4, 0),
 	SHELL_COND_CMD_ARG(CONFIG_GPIO_SHELL_TOGGLE_CMD, toggle, &sub_gpio_dev,
-		"Toggle GPIO pin\n"
-		"Usage: gpio toggle <device> <pin>", cmd_gpio_toggle, 3, 0),
-	SHELL_CMD(devices, NULL,
-		"List all GPIO devices\n"
-		"Usage: gpio devices", cmd_gpio_devices),
+			   SHELL_HELP("Toggle GPIO pin", "<device> <pin>"), cmd_gpio_toggle, 3, 0),
+	SHELL_CMD(devices, NULL, SHELL_HELP("List all GPIO devices", ""), cmd_gpio_devices),
 	SHELL_COND_CMD_ARG(CONFIG_GPIO_SHELL_BLINK_CMD, blink, &sub_gpio_dev,
-		"Blink GPIO pin\n"
-		"Usage: gpio blink <device> <pin>", cmd_gpio_blink, 3, 0),
+			   SHELL_HELP("Blink GPIO pin", "<device> <pin>"), cmd_gpio_blink, 3, 0),
 	SHELL_COND_CMD_ARG(CONFIG_GPIO_SHELL_INFO_CMD, info, &sub_gpio_dev,
-		"GPIO Information\n"
-		"Usage: gpio info [device]", cmd_gpio_info, 1, 1),
+			   SHELL_HELP("GPIO Information", "[device]"), cmd_gpio_info, 1, 1),
 	SHELL_SUBCMD_SET_END /* Array terminated. */
 );
 

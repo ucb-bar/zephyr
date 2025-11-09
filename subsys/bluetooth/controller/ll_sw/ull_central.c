@@ -268,6 +268,7 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 	conn_lll->df_tx_cfg.cte_rsp_en = 0U;
 #endif /* CONFIG_BT_CTLR_DF_CONN_CTE_TX */
 
+	conn->event_counter = 0U;
 	conn->connect_expire = CONN_ESTAB_COUNTDOWN;
 	conn->supervision_expire = 0U;
 	conn_interval_us = (uint32_t)interval * CONN_INT_UNIT_US;
@@ -315,13 +316,6 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 	conn_lll->tifs_rx_us = EVENT_IFS_DEFAULT_US;
 	conn_lll->tifs_hcto_us = EVENT_IFS_DEFAULT_US;
 	conn_lll->tifs_cis_us = EVENT_IFS_DEFAULT_US;
-
-	/* TODO: active_to_start feature port */
-	conn->ull.ticks_active_to_start = 0U;
-	conn->ull.ticks_prepare_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
-	conn->ull.ticks_preempt_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 
 #if defined(CONFIG_BT_CTLR_CHECK_SAME_PEER_CONN)
 	/* Remember peer and own identity address */
@@ -802,8 +796,7 @@ void ull_central_setup(struct node_rx_pdu *rx, struct node_rx_ftr *ftr,
 
 	ll_rx_put_sched(link, rx);
 
-	ticks_slot_offset = MAX(conn->ull.ticks_active_to_start,
-				conn->ull.ticks_prepare_to_start);
+	ticks_slot_offset = HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
 	if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT)) {
 		ticks_slot_overhead = ticks_slot_offset;
 	} else {
@@ -953,6 +946,15 @@ void ull_central_ticker_cb(uint32_t ticks_at_expire, uint32_t ticks_drift,
 	ref = ull_ref_inc(&conn->ull);
 	LL_ASSERT(ref);
 
+	/* Increment event counter.
+	 *
+	 * Refer to BT Spec v6.0, Vol 6, Part B, Section 4.5.1 Connection events
+	 *
+	 * `the connEventCounter shall wrap from 0xFFFF to 0x0000. This counter is used to
+	 * synchronize Link Layer control procedures.`
+	 */
+	conn->event_counter += (lazy + 1U);
+
 	/* De-mux 2 tx node from FIFO, sufficient to be able to set MD bit */
 	ull_conn_tx_demux(2);
 
@@ -1015,8 +1017,6 @@ static void ticker_op_stop_scan_cb(uint32_t status, void *param)
 #if defined(CONFIG_BT_CTLR_ADV_EXT) && defined(CONFIG_BT_CTLR_PHY_CODED)
 static void ticker_op_stop_scan_other_cb(uint32_t status, void *param)
 {
-	static memq_link_t link;
-	static struct mayfly mfy = {0, 0, &link, NULL, NULL};
 	struct ll_scan_set *scan;
 	struct ull_hdr *hdr;
 
@@ -1035,11 +1035,13 @@ static void ticker_op_stop_scan_other_cb(uint32_t status, void *param)
 	 */
 	scan = param;
 	hdr = &scan->ull;
-	mfy.param = &scan->lll;
 	if (ull_ref_get(hdr)) {
+		static memq_link_t link;
+		static struct mayfly mfy = {0, 0, &link, NULL, lll_disable};
 		uint32_t ret;
 
-		mfy.fp = lll_disable;
+		mfy.param = &scan->lll;
+
 		ret = mayfly_enqueue(TICKER_USER_ID_ULL_LOW,
 				     TICKER_USER_ID_LLL, 0, &mfy);
 		LL_ASSERT(!ret);

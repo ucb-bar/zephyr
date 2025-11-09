@@ -30,7 +30,7 @@ tests:
     # but the RT595 uses external PSRAM for the display buffer
     min_ram: 32
     harness: none
-    extra_args: SHIELD="rk055hdmipi4m"
+    extra_args: SHIELD="rk055hdmipi4ma0"
     platform_allow:
       - mimxrt1170_evk/mimxrt1176/cm7
       - mimxrt595_evk/mimxrt595s/cm33
@@ -80,12 +80,13 @@ tests:
     extra_args: SHIELD=rk043fn02h_ct
     harness_config:
       fixture: fixture_display_rk043fn02h_ct
-  sample.subsys.display.lvgl.rtkmipilcdb00000be:
-    tags: shield
-    platform_allow:
-      - ek_ra8d1
-    harness: console
-    extra_args: SHIELD=rtkmipilcdb00000be
+  sample.subsys.display.lvgl.renesas_ra_glcdc:
+    tags:
+      - shield
+    filter: dt_compat_enabled("renesas,ra-glcdc")
+    extra_args:
+      - platform:ek_ra8d1/r7fa8d1bhecbd:SHIELD=rtkmipilcdb00000be
+      - platform:ek_ra8d1/r7fa8d1bhecbd:SHIELD="rtk7eka6m3b00001bu;ek_ra8d1_rtk7eka6m3b00001bu"
     harness_config:
       fixture: fixture_display
   sample.subsys.display.lvgl.seeed_xiao_round_display:

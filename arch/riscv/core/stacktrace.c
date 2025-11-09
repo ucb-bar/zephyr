@@ -7,6 +7,7 @@
 #include <zephyr/debug/symtab.h>
 #include <zephyr/kernel.h>
 #include <zephyr/kernel_structs.h>
+#include <zephyr/linker/linker-defs.h>
 #include <kernel_internal.h>
 #include <zephyr/logging/log.h>
 
@@ -90,9 +91,7 @@ static bool in_stack_bound(uintptr_t addr, const struct k_thread *const thread,
 
 static inline bool in_text_region(uintptr_t addr)
 {
-	extern uintptr_t __text_region_start, __text_region_end;
-
-	return (addr >= (uintptr_t)&__text_region_start) && (addr < (uintptr_t)&__text_region_end);
+	return (addr >= (uintptr_t)__text_region_start) && (addr < (uintptr_t)__text_region_end);
 }
 
 #ifdef CONFIG_FRAME_POINTER
@@ -255,11 +254,11 @@ static bool in_fatal_stack_bound(uintptr_t addr, const struct k_thread *const th
 
 #ifdef CONFIG_SYMTAB
 #define LOG_STACK_TRACE(idx, sfp, ra, name, offset)                                                \
-	LOG_ERR("     %2d: " SFP ": " PR_REG " ra: " PR_REG " [%s+0x%x]", idx, sfp, ra, name,      \
-		offset)
+	EXCEPTION_DUMP("     %2d: " SFP ": " PR_REG " ra: " PR_REG " [%s+0x%x]",		   \
+			idx, sfp, ra, name,  offset)
 #else
 #define LOG_STACK_TRACE(idx, sfp, ra, name, offset)                                                \
-	LOG_ERR("     %2d: " SFP ": " PR_REG " ra: " PR_REG, idx, sfp, ra)
+	EXCEPTION_DUMP("     %2d: " SFP ": " PR_REG " ra: " PR_REG, idx, sfp, ra)
 #endif /* CONFIG_SYMTAB */
 
 static bool print_trace_address(void *arg, unsigned long ra, unsigned long sfp)
@@ -279,8 +278,8 @@ void z_riscv_unwind_stack(const struct arch_esf *esf, const _callee_saved_t *csf
 {
 	int i = 0;
 
-	LOG_ERR("call trace:");
+	EXCEPTION_DUMP("call trace:");
 	walk_stackframe(print_trace_address, &i, _current, esf, in_fatal_stack_bound, csf);
-	LOG_ERR("");
+	EXCEPTION_DUMP("");
 }
 #endif /* CONFIG_EXCEPTION_STACK_TRACE */

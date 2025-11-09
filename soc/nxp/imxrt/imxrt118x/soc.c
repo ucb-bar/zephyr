@@ -26,7 +26,8 @@
 
 LOG_MODULE_REGISTER(soc, CONFIG_SOC_LOG_LEVEL);
 
-#if  defined(CONFIG_SECOND_CORE_MCUX) && defined(CONFIG_CPU_CORTEX_M33)
+#if defined(CONFIG_SECOND_CORE_MCUX) && defined(CONFIG_CPU_CORTEX_M33)
+#if !defined(CONFIG_CM7_BOOT_FROM_FLASH)
 #include <zephyr_image_info.h>
 /* Memcpy macro to copy segments from secondary core image stored in flash
  * to RAM section that secondary core boots from.
@@ -36,6 +37,7 @@ LOG_MODULE_REGISTER(soc, CONFIG_SOC_LOG_LEVEL);
 	memcpy((uint32_t *)(((SEGMENT_LMA_ADDRESS_ ## n) - ADJUSTED_LMA) + 0x303C0000),	\
 		(uint32_t *)(SEGMENT_LMA_ADDRESS_ ## n),			\
 		(SEGMENT_SIZE_ ## n))
+#endif /* !defined(CONFIG_CM7_BOOT_FROM_FLASH) */
 #endif
 
 /*
@@ -69,6 +71,18 @@ LOG_MODULE_REGISTER(soc, CONFIG_SOC_LOG_LEVEL);
 #define CM33_SET_TRDC 1U
 #endif
 
+#if (defined(CONFIG_SECOND_CORE_MCUX) && defined(CONFIG_CPU_CORTEX_M33))
+/* Handle CM7 core initialization based on execution mode */
+#if !defined(CONFIG_CM7_BOOT_FROM_FLASH)
+#define CM7_BOOT_ADDRESS (0)
+#else
+/* Get CM7 partition address from device tree */
+#define CM7_PARTITION_NODE DT_CHOSEN(zephyr_code_m7_partition)
+#define CM7_FLASH_ADDR     DT_REG_ADDR(CM7_PARTITION_NODE)
+#define CM7_BOOT_ADDRESS   (CM7_FLASH_ADDR + CONFIG_CM7_FLEXSPI_OFFSET)
+#endif /* defined(CONFIG_CM7_BOOT_FROM_FLASH) */
+#endif /* (defined(CONFIG_SECOND_CORE_MCUX) && defined(CONFIG_CPU_CORTEX_M33)) */
+
 #ifdef CONFIG_INIT_ARM_PLL
 static const clock_arm_pll_config_t armPllConfig_BOARD_BootClockRUN = {
 #if defined(CONFIG_SOC_MIMXRT1189_CM33) || defined(CONFIG_SOC_MIMXRT1189_CM7)
@@ -77,7 +91,7 @@ static const clock_arm_pll_config_t armPllConfig_BOARD_BootClockRUN = {
 	/* PLL Loop divider, Fout = Fin * ( loopDivider / ( 2 * postDivider ) ) */
 	.loopDivider = 132,
 #else
-	#error "Unknown SOC, no pll configuration defined"
+#error "Unknown SOC, no pll configuration defined"
 #endif
 };
 #endif
@@ -131,7 +145,6 @@ __weak void clock_init(void)
 
 	/* Init OSC RC 400M */
 	CLOCK_OSC_EnableOscRc400M();
-	CLOCK_OSC_GateOscRc400M(false);
 
 #if CONFIG_CPU_CORTEX_M7
 	/* Switch both core to OscRC400M first */
@@ -259,13 +272,57 @@ __weak void clock_init(void)
 	CLOCK_SetRootClock(kCLOCK_Root_M7_Systick, &rootCfg);
 #endif
 
-#if defined(CONFIG_UART_MCUX_LPUART) && \
-	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart1)) \
+#if defined(CONFIG_UART_MCUX_LPUART)
+
+#if	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart1)) \
 	|| DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart2)))
 	/* Configure LPUART0102 using SYS_PLL3_DIV2_CLK */
 	rootCfg.mux = kCLOCK_LPUART0102_ClockRoot_MuxSysPll3Div2;
 	rootCfg.div = 10;
+	CLOCK_SetRootClock(kCLOCK_Root_Lpuart0102, &rootCfg);
 #endif
+
+#if	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart3)) \
+	|| DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart4)))
+	/* Configure LPUART0304 using SYS_PLL3_DIV2_CLK */
+	rootCfg.mux = kCLOCK_LPUART0304_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 10;
+	CLOCK_SetRootClock(kCLOCK_Root_Lpuart0304, &rootCfg);
+#endif
+
+#if	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart5)) \
+	|| DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart6)))
+	/* Configure LPUART0506 using SYS_PLL3_DIV2_CLK */
+	rootCfg.mux = kCLOCK_LPUART0506_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 10;
+	CLOCK_SetRootClock(kCLOCK_Root_Lpuart0506, &rootCfg);
+#endif
+
+#if	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart7)) \
+	|| DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart8)))
+	/* Configure LPUART0708 using SYS_PLL3_DIV2_CLK */
+	rootCfg.mux = kCLOCK_LPUART0708_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 10;
+	CLOCK_SetRootClock(kCLOCK_Root_Lpuart0708, &rootCfg);
+#endif
+
+#if	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart9)) \
+	|| DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart10)))
+	/* Configure LPUART0910 using SYS_PLL3_DIV2_CLK */
+	rootCfg.mux = kCLOCK_LPUART0910_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 10;
+	CLOCK_SetRootClock(kCLOCK_Root_Lpuart0910, &rootCfg);
+#endif
+
+#if	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart11)) \
+	|| DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart12)))
+	/* Configure LPUART1112 using SYS_PLL3_DIV2_CLK */
+	rootCfg.mux = kCLOCK_LPUART1112_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 10;
+	CLOCK_SetRootClock(kCLOCK_Root_Lpuart1112, &rootCfg);
+#endif
+
+#endif /* CONFIG_UART_MCUX_LPUART */
 
 #if defined(CONFIG_I2C_MCUX_LPI2C) && \
 	(DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpi2c1)) \
@@ -294,7 +351,7 @@ __weak void clock_init(void)
 	CLOCK_SetRootClock(kCLOCK_Root_Lpi2c0506, &rootCfg);
 #endif
 
-#if defined(CONFIG_SPI_MCUX_LPSPI)
+#if defined(CONFIG_SPI_NXP_LPSPI)
 
 #if	(DT_NODE_HAS_STATUS(DT_NODELABEL(lpspi1), okay) \
 	|| DT_NODE_HAS_STATUS(DT_NODELABEL(lpspi2), okay))
@@ -320,7 +377,7 @@ __weak void clock_init(void)
 	CLOCK_SetRootClock(kCLOCK_Root_Lpspi0506, &rootCfg);
 #endif
 
-#endif /* CONFIG_SPI_MCUX_LPSPI */
+#endif /* CONFIG_SPI_NXP_LPSPI */
 
 #if defined(CONFIG_COUNTER_MCUX_GPT)
 
@@ -340,7 +397,7 @@ __weak void clock_init(void)
 
 #endif /* CONFIG_COUNTER_MCUX_GPT */
 
-#ifdef CONFIG_MCUX_ACMP
+#if defined(CONFIG_COMPARATOR_MCUX_ACMP) || defined(CONFIG_SENSOR_MCUX_ACMP)
 
 #if (DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(acmp1))  \
 	|| DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(acmp2)) \
@@ -352,7 +409,7 @@ __weak void clock_init(void)
 	CLOCK_SetRootClock(kCLOCK_Root_Acmp, &rootCfg);
 #endif
 
-#endif /* CONFIG_MCUX_ACMP */
+#endif /* CONFIG_COMPARATOR_MCUX_ACMP || CONFIG_SENSOR_MCUX_ACMP */
 
 #if defined(CONFIG_ETH_NXP_IMX_NETC) && (DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(netc)) != 0)
 	/* Configure ENET using SYS_PLL1_DIV2_CLK */
@@ -437,6 +494,24 @@ __weak void clock_init(void)
 
 #endif /* CONFIG_CAN_MCUX_FLEXCAN */
 
+#ifdef CONFIG_MCUX_FLEXIO
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(flexio1), okay)
+	/* Configure FLEXIO1 using SYS_PLL3_DIV2_CLK */
+	rootCfg.mux = kCLOCK_FLEXIO1_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 2;
+	CLOCK_SetRootClock(kCLOCK_Root_Flexio1, &rootCfg);
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(flexio2), okay)
+	/* Configure FLEXIO2 using SYS_PLL3_DIV2_CLK */
+	rootCfg.mux = kCLOCK_FLEXIO2_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 1;
+	CLOCK_SetRootClock(kCLOCK_Root_Flexio2, &rootCfg);
+#endif
+
+#endif /* CONFIG_MCUX_FLEXIO */
+
 #if defined(CONFIG_MCUX_LPTMR_TIMER) || defined(CONFIG_COUNTER_MCUX_LPTMR)
 
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(lptmr1), okay)
@@ -470,8 +545,6 @@ __weak void clock_init(void)
 	CLOCK_SetRootClock(kCLOCK_Root_Flexspi1, &rootCfg);
 #endif
 
-#ifdef CONFIG_HAS_MCUX_TPM
-
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(tpm2), okay)
 	/* Configure TPM2 using SYS_PLL3_DIV2_CLK */
 	rootCfg.mux = kCLOCK_TPM2_ClockRoot_MuxSysPll3Div2;
@@ -500,8 +573,6 @@ __weak void clock_init(void)
 	CLOCK_SetRootClock(kCLOCK_Root_Tpm6, &rootCfg);
 #endif
 
-#endif /* CONFIG_HAS_MCUX_TPM */
-
 #ifdef CONFIG_DT_HAS_NXP_MCUX_I3C_ENABLED
 
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(i3c1), okay)
@@ -527,6 +598,13 @@ __weak void clock_init(void)
 		DT_PROP_BY_PHANDLE(DT_NODELABEL(usb1), clocks, clock_frequency));
 #endif
 
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(usb2)) && CONFIG_UDC_NXP_EHCI
+	CLOCK_EnableUsbhs1PhyPllClock(kCLOCK_Usb480M,
+		DT_PROP_BY_PHANDLE(DT_NODELABEL(usb2), clocks, clock_frequency));
+	CLOCK_EnableUsbhs1Clock(kCLOCK_Usb480M,
+		DT_PROP_BY_PHANDLE(DT_NODELABEL(usb2), clocks, clock_frequency));
+#endif
+
 #ifdef CONFIG_IMX_USDHC
 
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(usdhc1), okay)
@@ -545,12 +623,25 @@ __weak void clock_init(void)
 
 #endif /* CONFIG_IMX_USDHC */
 
+#ifdef CONFIG_COUNTER_MCUX_LPIT
+	/* LPIT1 use BUS_AON, LPIT2 use BUS_WAKEUP, which have been configured */
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(lpit3), okay)
+	/* Configure LPIT3 using SysPll3Div2 */
+	rootCfg.mux = kCLOCK_LPIT3_ClockRoot_MuxSysPll3Div2;
+	rootCfg.div = 3;
+	CLOCK_SetRootClock(kCLOCK_Root_Lpit3, &rootCfg);
+#endif
+#endif /* CONFIG_COUNTER_MCUX_LPIT */
+
 	/* Keep core clock ungated during WFI */
 	CCM->LPCG[1].LPM0 = 0x33333333;
 	CCM->LPCG[1].LPM1 = 0x33333333;
 
 	/* Let the core clock still running in WAIT mode */
 	BLK_CTRL_S_AONMIX->M7_CFG |= BLK_CTRL_S_AONMIX_M7_CFG_CORECLK_FORCE_ON_MASK;
+
+	/* Make AHB clock run (enabled) when CM7 is sleeping and TCM is accessible */
+	BLK_CTRL_S_AONMIX->M7_CFG |= BLK_CTRL_S_AONMIX_M7_CFG_HCLK_FORCE_ON_MASK;
 
 	/* Keep the system clock running so SYSTICK can wake up
 	 * the system from wfi.
@@ -560,6 +651,36 @@ __weak void clock_init(void)
 	GPC_CM_EnableCpuSleepHold(0, false);
 	GPC_CM_EnableCpuSleepHold(1, false);
 }
+
+#ifdef CONFIG_I2S_MCUX_SAI
+void imxrt_audio_codec_pll_init(uint32_t clock_name, uint32_t clk_src, uint32_t clk_pre_div,
+				uint32_t clk_src_div)
+{
+	ARG_UNUSED(clk_pre_div);
+
+	switch (clock_name) {
+	case IMX_CCM_SAI1_CLK:
+		CLOCK_SetRootClockMux(kCLOCK_Root_Sai1, clk_src);
+		CLOCK_SetRootClockDiv(kCLOCK_Root_Sai1, clk_src_div);
+		break;
+	case IMX_CCM_SAI2_CLK:
+		CLOCK_SetRootClockMux(kCLOCK_Root_Sai2, clk_src);
+		CLOCK_SetRootClockDiv(kCLOCK_Root_Sai2, clk_src_div);
+		break;
+	case IMX_CCM_SAI3_CLK:
+		CLOCK_SetRootClockMux(kCLOCK_Root_Sai3, clk_src);
+		CLOCK_SetRootClockDiv(kCLOCK_Root_Sai3, clk_src_div);
+		break;
+	case IMX_CCM_SAI4_CLK:
+		CLOCK_SetRootClockMux(kCLOCK_Root_Sai4, clk_src);
+		CLOCK_SetRootClockDiv(kCLOCK_Root_Sai4, clk_src_div);
+		break;
+	default:
+		return;
+	}
+}
+#endif /* CONFIG_I2S_MCUX_SAI */
+
 
 /**
  * @brief Initialize the system clock
@@ -712,6 +833,7 @@ void soc_early_init_hook(void)
 #endif /* defined(CONFIG_WDT_MCUX_RTWDOG) */
 
 #if (defined(CONFIG_SECOND_CORE_MCUX) && defined(CONFIG_CPU_CORTEX_M33))
+#if !defined(CONFIG_CM7_BOOT_FROM_FLASH)
 	/**
 	 * Copy CM7 core from flash to memory. Note that depending on where the
 	 * user decided to store CM7 code, this is likely going to read from the
@@ -723,6 +845,7 @@ void soc_early_init_hook(void)
 	 */
 	LISTIFY(SEGMENT_NUM, MEMCPY_SEGMENT, (;));
 #endif /* (defined(CONFIG_SECOND_CORE_MCUX) && defined(CONFIG_CPU_CORTEX_M33)) */
+#endif /* !defined(CONFIG_CM7_BOOT_FROM_FLASH) */
 
 	/* Enable data cache */
 	sys_cache_data_enable();
@@ -737,7 +860,7 @@ void soc_reset_hook(void)
 	SystemInit();
 
 #if defined(CONFIG_SECOND_CORE_MCUX) && defined(CONFIG_CPU_CORTEX_M33)
-	Prepare_CM7(0);
+	Prepare_CM7(CM7_BOOT_ADDRESS);
 #endif
 }
 #endif

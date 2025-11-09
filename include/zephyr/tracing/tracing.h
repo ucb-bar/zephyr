@@ -6,8 +6,6 @@
 #ifndef ZEPHYR_INCLUDE_TRACING_TRACING_H_
 #define ZEPHYR_INCLUDE_TRACING_TRACING_H_
 
-#include <zephyr/kernel.h>
-
 #include "tracking.h"
 
 #if defined CONFIG_SEGGER_SYSTEMVIEW
@@ -1420,6 +1418,28 @@
 #define sys_port_trace_k_msgq_put_exit(msgq, timeout, ret)
 
 /**
+ * @brief Trace Message Queue put at front attempt entry
+ * @param msgq Message Queue object
+ * @param timeout Timeout period
+ */
+#define sys_port_trace_k_msgq_put_front_enter(msgq, timeout)
+
+/**
+ * @brief Trace Message Queue put at front attempt blocking
+ * @param msgq Message Queue object
+ * @param timeout Timeout period
+ */
+#define sys_port_trace_k_msgq_put_front_blocking(msgq, timeout)
+
+/**
+ * @brief Trace Message Queue put at front attempt outcome
+ * @param msgq Message Queue object
+ * @param timeout Timeout period
+ * @param ret Return value
+ */
+#define sys_port_trace_k_msgq_put_front_exit(msgq, timeout, ret)
+
+/**
  * @brief Trace Message Queue get attempt entry
  * @param msgq Message Queue object
  * @param timeout Timeout period
@@ -1633,100 +1653,6 @@
  */
 #define sys_port_trace_k_pipe_read_exit(pipe, ret)
 
-/**
- * @brief Trace Pipe cleanup entry
- * @param pipe Pipe object
- */
-#define sys_port_trace_k_pipe_cleanup_enter(pipe)
-
-/**
- * @brief Trace Pipe cleanup exit
- * @param pipe Pipe object
- * @param ret Return value
- */
-#define sys_port_trace_k_pipe_cleanup_exit(pipe, ret)
-
-/**
- * @brief Trace Pipe alloc init entry
- * @param pipe Pipe object
- */
-#define sys_port_trace_k_pipe_alloc_init_enter(pipe)
-
-/**
- * @brief Trace Pipe alloc init exit
- * @param pipe Pipe object
- * @param ret Return value
- */
-#define sys_port_trace_k_pipe_alloc_init_exit(pipe, ret)
-
-/**
- * @brief Trace Pipe flush entry
- * @param pipe Pipe object
- */
-#define sys_port_trace_k_pipe_flush_enter(pipe)
-
-/**
- * @brief Trace Pipe flush exit
- * @param pipe Pipe object
- */
-#define sys_port_trace_k_pipe_flush_exit(pipe)
-
-/**
- * @brief Trace Pipe buffer flush entry
- * @param pipe Pipe object
- */
-#define sys_port_trace_k_pipe_buffer_flush_enter(pipe)
-
-/**
- * @brief Trace Pipe buffer flush exit
- * @param pipe Pipe object
- */
-#define sys_port_trace_k_pipe_buffer_flush_exit(pipe)
-
-/**
- * @brief Trace Pipe put attempt entry
- * @param pipe Pipe object
- * @param timeout Timeout period
- */
-#define sys_port_trace_k_pipe_put_enter(pipe, timeout)
-
-/**
- * @brief Trace Pipe put attempt blocking
- * @param pipe Pipe object
- * @param timeout Timeout period
- */
-#define sys_port_trace_k_pipe_put_blocking(pipe, timeout)
-
-/**
- * @brief Trace Pipe put attempt outcome
- * @param pipe Pipe object
- * @param timeout Timeout period
- * @param ret Return value
- */
-#define sys_port_trace_k_pipe_put_exit(pipe, timeout, ret)
-
-/**
- * @brief Trace Pipe get attempt entry
- * @param pipe Pipe object
- * @param timeout Timeout period
- */
-#define sys_port_trace_k_pipe_get_enter(pipe, timeout)
-
-/**
- * @brief Trace Pipe get attempt blocking
- * @param pipe Pipe object
- * @param timeout Timeout period
- */
-#define sys_port_trace_k_pipe_get_blocking(pipe, timeout)
-
-/**
- * @brief Trace Pipe get attempt outcome
- * @param pipe Pipe object
- * @param timeout Timeout period
- * @param ret Return value
- */
-#define sys_port_trace_k_pipe_get_exit(pipe, timeout, ret)
-
 /** @} */ /* end of subsys_tracing_apis_pipe */
 
 /**
@@ -1753,7 +1679,7 @@
  * @param h Heap object
  * @param timeout Timeout period
  */
-#define sys_port_trace_k_heap_aligned_alloc_blocking(h, timeout)
+#define sys_port_trace_k_heap_alloc_helper_blocking(h, timeout)
 
 /**
  * @brief Trace Heap align alloc attempt outcome

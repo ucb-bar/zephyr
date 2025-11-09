@@ -5,7 +5,7 @@
  */
 
 #include <zephyr/kernel.h>
-#include <ksched.h>
+#include <kernel_internal.h>
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/sys/atomic.h>
@@ -26,10 +26,11 @@ static const osThreadAttr_t init_thread_attrs = {
 };
 
 static sys_dlist_t thread_list;
-static atomic_t thread_num;
 
 static atomic_t num_dynamic_cb;
+#if CONFIG_CMSIS_V2_THREAD_MAX_COUNT != 0
 static struct cmsis_rtos_thread_cb cmsis_rtos_thread_cb_pool[CONFIG_CMSIS_V2_THREAD_MAX_COUNT];
+#endif
 
 static atomic_t num_dynamic_stack;
 #if CONFIG_CMSIS_V2_THREAD_DYNAMIC_MAX_COUNT != 0
@@ -106,14 +107,8 @@ osThreadId_t osThreadNew(osThreadFunc_t threadfunc, void *arg, const osThreadAtt
 	static uint32_t one_time;
 	void *stack;
 	size_t stack_size;
-	uint32_t this_thread_num;
-	uint32_t this_dynamic_cb;
 
 	if (k_is_in_isr()) {
-		return NULL;
-	}
-
-	if (thread_num >= CONFIG_CMSIS_V2_THREAD_MAX_COUNT) {
 		return NULL;
 	}
 
@@ -139,9 +134,6 @@ osThreadId_t osThreadNew(osThreadFunc_t threadfunc, void *arg, const osThreadAtt
 	BUILD_ASSERT(osPriorityISR <= CONFIG_NUM_PREEMPT_PRIORITIES,
 		     "Configure NUM_PREEMPT_PRIORITIES to at least osPriorityISR");
 
-	BUILD_ASSERT(CONFIG_CMSIS_V2_THREAD_DYNAMIC_MAX_COUNT <= CONFIG_CMSIS_V2_THREAD_MAX_COUNT,
-		     "Number of dynamic threads cannot exceed max number of threads.");
-
 	BUILD_ASSERT(CONFIG_CMSIS_V2_THREAD_DYNAMIC_STACK_SIZE <=
 			     CONFIG_CMSIS_V2_THREAD_MAX_STACK_SIZE,
 		     "Default dynamic thread stack size cannot exceed max stack size");
@@ -150,18 +142,18 @@ osThreadId_t osThreadNew(osThreadFunc_t threadfunc, void *arg, const osThreadAtt
 
 	__ASSERT((cv2_prio >= osPriorityIdle) && (cv2_prio <= osPriorityISR), "invalid priority\n");
 
-	if (attr->stack_mem != NULL) {
-		if (attr->stack_size == 0) {
-			return NULL;
-		}
+	if (attr->stack_mem != NULL && attr->stack_size == 0) {
+		return NULL;
 	}
 
-	this_thread_num = atomic_inc(&thread_num);
-
+#if CONFIG_CMSIS_V2_THREAD_MAX_COUNT != 0
 	if (attr->cb_mem == NULL) {
+		uint32_t this_dynamic_cb;
 		this_dynamic_cb = atomic_inc(&num_dynamic_cb);
 		tid = &cmsis_rtos_thread_cb_pool[this_dynamic_cb];
-	} else {
+	} else
+#endif
+	{
 		tid = (struct cmsis_rtos_thread_cb *)attr->cb_mem;
 	}
 
@@ -200,37 +192,25 @@ osThreadId_t osThreadNew(osThreadFunc_t threadfunc, void *arg, const osThreadAtt
 	(void)k_thread_create(&tid->z_thread, stack, stack_size, zephyr_thread_wrapper, (void *)arg,
 			      NULL, threadfunc, prio, 0, K_NO_WAIT);
 
-	if (attr->name == NULL) {
-		strncpy(tid->name, init_thread_attrs.name, sizeof(tid->name) - 1);
-	} else {
-		strncpy(tid->name, attr->name, sizeof(tid->name) - 1);
-	}
+	const char *name = (attr->name == NULL) ? init_thread_attrs.name : attr->name;
 
-	k_thread_name_set(&tid->z_thread, tid->name);
+	k_thread_name_set(&tid->z_thread, name);
 
 	return (osThreadId_t)tid;
 }
 
 /**
  * @brief Get name of a thread.
+ * This function may be called from Interrupt Service Routines.
  */
 const char *osThreadGetName(osThreadId_t thread_id)
 {
-	const char *name = NULL;
+	struct cmsis_rtos_thread_cb *tid = (struct cmsis_rtos_thread_cb *)thread_id;
 
-	if (k_is_in_isr() || (thread_id == NULL)) {
-		name = NULL;
-	} else {
-		if (is_cmsis_rtos_v2_thread(thread_id) == NULL) {
-			name = NULL;
-		} else {
-			struct cmsis_rtos_thread_cb *tid = (struct cmsis_rtos_thread_cb *)thread_id;
-
-			name = k_thread_name_get(&tid->z_thread);
-		}
+	if (tid == NULL) {
+		return NULL;
 	}
-
-	return name;
+	return k_thread_name_get(&tid->z_thread);
 }
 
 /**

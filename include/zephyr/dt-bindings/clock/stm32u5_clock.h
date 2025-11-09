@@ -11,7 +11,7 @@
 
 /** Domain clocks */
 
-/* RM0468, Table 56 Kernel clock distribution summary */
+/* RM0456, Figure 36 Clock tree for STM32U5 Series */
 
 /** System clock */
 /* defined in stm32_common_clocks.h */
@@ -26,8 +26,10 @@
 #define STM32_SRC_PCLK1		(STM32_SRC_HCLK + 1)
 #define STM32_SRC_PCLK2		(STM32_SRC_PCLK1 + 1)
 #define STM32_SRC_PCLK3		(STM32_SRC_PCLK2 + 1)
+#define STM32_SRC_TIMPCLK1	(STM32_SRC_PCLK3 + 1)
+#define STM32_SRC_TIMPCLK2	(STM32_SRC_TIMPCLK1 + 1)
 /** PLL outputs */
-#define STM32_SRC_PLL1_P	(STM32_SRC_PCLK3 + 1)
+#define STM32_SRC_PLL1_P	(STM32_SRC_TIMPCLK2 + 1)
 #define STM32_SRC_PLL1_Q	(STM32_SRC_PLL1_P + 1)
 #define STM32_SRC_PLL1_R	(STM32_SRC_PLL1_Q + 1)
 #define STM32_SRC_PLL2_P	(STM32_SRC_PLL1_R + 1)

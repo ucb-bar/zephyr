@@ -24,10 +24,12 @@ LOG_MODULE_REGISTER(i3c_shell, CONFIG_LOG_DEFAULT_LEVEL);
 
 struct i3c_ctrl {
 	const struct device *dev;
+#ifdef CONFIG_I3C_CONTROLLER
 	const union shell_cmd_entry *i3c_attached_dev_subcmd;
 	const union shell_cmd_entry *i3c_list_dev_subcmd;
+#endif
 };
-
+#ifdef CONFIG_I3C_CONTROLLER
 #define I3C_ATTACHED_DEV_GET_FN(node_id)                                                           \
 	static void node_id##cmd_i3c_attached_get(size_t idx, struct shell_static_entry *entry);   \
                                                                                                    \
@@ -79,30 +81,39 @@ struct i3c_ctrl {
 	I3C_LIST_DEV_GET_FN(node_id)
 
 /* zephyr-keep-sorted-start */
+DT_FOREACH_STATUS_OKAY(adi_max32_i3c, I3C_CTRL_FN)
 DT_FOREACH_STATUS_OKAY(cdns_i3c, I3C_CTRL_FN)
+DT_FOREACH_STATUS_OKAY(ite_it51xxx_i3cm, I3C_CTRL_FN)
+DT_FOREACH_STATUS_OKAY(ite_it51xxx_i3cs, I3C_CTRL_FN)
 DT_FOREACH_STATUS_OKAY(nuvoton_npcx_i3c, I3C_CTRL_FN)
 DT_FOREACH_STATUS_OKAY(nxp_mcux_i3c, I3C_CTRL_FN)
+DT_FOREACH_STATUS_OKAY(renesas_ra_i3c, I3C_CTRL_FN)
 DT_FOREACH_STATUS_OKAY(snps_designware_i3c, I3C_CTRL_FN)
 DT_FOREACH_STATUS_OKAY(st_stm32_i3c, I3C_CTRL_FN)
 /* zephyr-keep-sorted-stop */
-
+#endif /* CONFIG_I3C_CONTROLLER */
 #define I3C_CTRL_LIST_ENTRY(node_id)                                                               \
 	{                                                                                          \
 		.dev = DEVICE_DT_GET(node_id),                                                     \
-		.i3c_attached_dev_subcmd = &node_id##sub_i3c_attached,                             \
-		.i3c_list_dev_subcmd = &node_id##sub_i3c_list,                                     \
+		IF_ENABLED(CONFIG_I3C_CONTROLLER,                                                  \
+			   (.i3c_attached_dev_subcmd = &node_id##sub_i3c_attached,                 \
+			    .i3c_list_dev_subcmd = &node_id##sub_i3c_list,))                       \
 	},
 
 const struct i3c_ctrl i3c_list[] = {
 	/* zephyr-keep-sorted-start */
+	DT_FOREACH_STATUS_OKAY(adi_max32_i3c, I3C_CTRL_LIST_ENTRY)
 	DT_FOREACH_STATUS_OKAY(cdns_i3c, I3C_CTRL_LIST_ENTRY)
+	DT_FOREACH_STATUS_OKAY(ite_it51xxx_i3cm, I3C_CTRL_LIST_ENTRY)
+	DT_FOREACH_STATUS_OKAY(ite_it51xxx_i3cs, I3C_CTRL_LIST_ENTRY)
 	DT_FOREACH_STATUS_OKAY(nuvoton_npcx_i3c, I3C_CTRL_LIST_ENTRY)
 	DT_FOREACH_STATUS_OKAY(nxp_mcux_i3c, I3C_CTRL_LIST_ENTRY)
+	DT_FOREACH_STATUS_OKAY(renesas_ra_i3c, I3C_CTRL_LIST_ENTRY)
 	DT_FOREACH_STATUS_OKAY(snps_designware_i3c, I3C_CTRL_LIST_ENTRY)
 	DT_FOREACH_STATUS_OKAY(st_stm32_i3c, I3C_CTRL_LIST_ENTRY)
 	/* zephyr-keep-sorted-stop */
 };
-
+#ifdef CONFIG_I3C_CONTROLLER
 static int get_bytes_count_for_hex(char *arg)
 {
 	int length = (strlen(arg) + 1) / 2;
@@ -200,9 +211,6 @@ static int cmd_i3c_info(const struct shell *sh, size_t argc, char **argv)
 						    "\tpid: 0x%012llx\n"
 						    "\tstatic_addr: 0x%02x\n"
 						    "\tdynamic_addr: 0x%02x\n"
-#if defined(CONFIG_I3C_USE_GROUP_ADDR)
-						    "\tgroup_addr: 0x%02x\n"
-#endif
 						    "\tbcr: 0x%02x\n"
 						    "\tdcr: 0x%02x\n"
 						    "\tmaxrd: 0x%02x\n"
@@ -216,9 +224,6 @@ static int cmd_i3c_info(const struct shell *sh, size_t argc, char **argv)
 						    "\tcrcaps: 0x%02x; 0x%02x",
 						    desc->dev->name, (uint64_t)desc->pid,
 						    desc->static_addr, desc->dynamic_addr,
-#if defined(CONFIG_I3C_USE_GROUP_ADDR)
-						    desc->group_addr,
-#endif
 						    desc->bcr, desc->dcr, desc->data_speed.maxrd,
 						    desc->data_speed.maxwr,
 						    desc->data_speed.max_read_turnaround,
@@ -249,9 +254,6 @@ static int cmd_i3c_info(const struct shell *sh, size_t argc, char **argv)
 					    "\tpid: 0x%012llx\n"
 					    "\tstatic_addr: 0x%02x\n"
 					    "\tdynamic_addr: 0x%02x\n"
-#if defined(CONFIG_I3C_USE_GROUP_ADDR)
-					    "\tgroup_addr: 0x%02x\n"
-#endif
 					    "\tbcr: 0x%02x\n"
 					    "\tdcr: 0x%02x\n"
 					    "\tmaxrd: 0x%02x\n"
@@ -265,9 +267,6 @@ static int cmd_i3c_info(const struct shell *sh, size_t argc, char **argv)
 					    "\tcrcaps: 0x%02x; 0x%02x",
 					    desc->dev->name, (uint64_t)desc->pid, desc->static_addr,
 					    desc->dynamic_addr,
-#if defined(CONFIG_I3C_USE_GROUP_ADDR)
-					    desc->group_addr,
-#endif
 					    desc->bcr, desc->dcr, desc->data_speed.maxrd,
 					    desc->data_speed.maxwr,
 					    desc->data_speed.max_read_turnaround,
@@ -298,7 +297,7 @@ static int cmd_i3c_info(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-/* i3c speed <device> <speed> */
+/* i3c speed <device> <speed> [<od_min high_ns>] [<od_min low_ns>] */
 static int cmd_i3c_speed(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev;
@@ -321,6 +320,12 @@ static int cmd_i3c_speed(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	config.scl.i3c = speed;
+
+	if (argc == 5) {
+		/* This sets open-drain SCL high and low periods */
+		config.scl_od_min.high_ns = strtol(argv[ARGV_DEV + 2], NULL, 10);
+		config.scl_od_min.low_ns  = strtol(argv[ARGV_DEV + 3], NULL, 10);
+	}
 
 	ret = i3c_configure(dev, I3C_CONFIG_CONTROLLER, &config);
 	if (ret != 0) {
@@ -575,11 +580,40 @@ static int cmd_i3c_hdr_ddr_read(const struct shell *sh, size_t argc, char **argv
 	return ret;
 }
 
+/* i3c ccc rstdaa_dc <device> <target> */
+static int cmd_i3c_ccc_rstdaa_dc(const struct shell *sh, size_t argc, char **argv)
+{
+	const struct device *dev, *tdev;
+	struct i3c_device_desc *desc;
+	int ret;
+
+	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (!(desc->flags & I3C_V1P0_SUPPORT)) {
+		shell_error(sh, "I3C: %s does not support RSTDAA_DC.", tdev->name);
+		return -ENOTSUP;
+	}
+
+	ret = i3c_ccc_do_rstdaa(desc);
+	if (ret < 0) {
+		shell_error(sh, "I3C: unable to send CCC RSTDAA.");
+		return ret;
+	}
+
+	/* reset device DA */
+	desc->dynamic_addr = 0;
+	shell_print(sh, "Reset dynamic address for device %s", desc->dev->name);
+
+	return ret;
+}
+
 /* i3c ccc rstdaa <device> */
 static int cmd_i3c_ccc_rstdaa(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev;
-	struct i3c_device_desc *desc;
 	int ret;
 
 	dev = shell_device_get_binding(argv[ARGV_DEV]);
@@ -588,16 +622,9 @@ static int cmd_i3c_ccc_rstdaa(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	ret = i3c_ccc_do_rstdaa_all(dev);
+	ret = i3c_bus_rstdaa_all(dev);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC RSTDAA.");
-		return ret;
-	}
-
-	/* reset all devices DA */
-	I3C_BUS_FOR_EACH_I3CDEV(dev, desc) {
-		desc->dynamic_addr = 0;
-		shell_print(sh, "Reset dynamic address for device %s", desc->dev->name);
 	}
 
 	return ret;
@@ -621,7 +648,6 @@ static int cmd_i3c_ccc_entdaa(const struct shell *sh, size_t argc, char **argv)
 static int cmd_i3c_ccc_setaasa(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev;
-	struct i3c_device_desc *desc;
 	int ret;
 
 	dev = shell_device_get_binding(argv[ARGV_DEV]);
@@ -630,18 +656,10 @@ static int cmd_i3c_ccc_setaasa(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	ret = i3c_ccc_do_setaasa_all(dev);
+	ret = i3c_bus_setaasa(dev);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC SETAASA.");
 		return ret;
-	}
-
-	/* set all devices DA to SA */
-	I3C_BUS_FOR_EACH_I3CDEV(dev, desc) {
-		if ((desc->supports_setaasa) && (desc->dynamic_addr == 0) &&
-		    (desc->static_addr != 0)) {
-			desc->dynamic_addr = desc->static_addr;
-		}
 	}
 
 	return ret;
@@ -653,7 +671,6 @@ static int cmd_i3c_ccc_setdasa(const struct shell *sh, size_t argc, char **argv)
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
 	struct i3c_driver_data *data;
-	struct i3c_ccc_address da;
 	uint8_t dynamic_addr;
 	int ret;
 
@@ -664,27 +681,14 @@ static int cmd_i3c_ccc_setdasa(const struct shell *sh, size_t argc, char **argv)
 
 	data = (struct i3c_driver_data *)dev->data;
 	dynamic_addr = strtol(argv[3], NULL, 16);
-	da.addr = dynamic_addr << 1;
-	/* check if the addressed is free */
-	if (!i3c_addr_slots_is_free(&data->attached_dev.addr_slots, dynamic_addr)) {
-		shell_error(sh, "I3C: Address 0x%02x is already in use.", dynamic_addr);
-		return -EINVAL;
-	}
-	ret = i3c_ccc_do_setdasa(desc, da);
+
+	ret = i3c_bus_setdasa(desc, dynamic_addr);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC SETDASA.");
 		return ret;
 	}
 
-	/* update the target's dynamic address */
-	desc->dynamic_addr = dynamic_addr;
-	if (desc->dynamic_addr != desc->static_addr) {
-		ret = i3c_reattach_i3c_device(desc, desc->static_addr);
-		if (ret < 0) {
-			shell_error(sh, "I3C: unable to reattach device");
-			return ret;
-		}
-	}
+	shell_print(sh, "I3C: Dynamic address set to 0x%02x", desc->dynamic_addr);
 
 	return ret;
 }
@@ -695,7 +699,6 @@ static int cmd_i3c_ccc_setnewda(const struct shell *sh, size_t argc, char **argv
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
 	struct i3c_driver_data *data;
-	struct i3c_ccc_address new_da;
 	uint8_t dynamic_addr;
 	uint8_t old_da;
 	int ret;
@@ -707,27 +710,16 @@ static int cmd_i3c_ccc_setnewda(const struct shell *sh, size_t argc, char **argv
 
 	data = (struct i3c_driver_data *)dev->data;
 	dynamic_addr = strtol(argv[3], NULL, 16);
-	new_da.addr = dynamic_addr << 1;
-	/* check if the addressed is free */
-	if (!i3c_addr_slots_is_free(&data->attached_dev.addr_slots, dynamic_addr)) {
-		shell_error(sh, "I3C: Address 0x%02x is already in use.", dynamic_addr);
-		return -EINVAL;
-	}
-
-	ret = i3c_ccc_do_setnewda(desc, new_da);
-	if (ret < 0) {
-		shell_error(sh, "I3C: unable to send CCC SETDASA.");
-		return ret;
-	}
-
-	/* reattach device address */
 	old_da = desc->dynamic_addr;
-	desc->dynamic_addr = dynamic_addr;
-	ret = i3c_reattach_i3c_device(desc, old_da);
+
+	ret = i3c_bus_setnewda(desc, dynamic_addr);
 	if (ret < 0) {
-		shell_error(sh, "I3C: unable to reattach device");
+		shell_error(sh, "I3C: unable to send CCC SETNEWDA.");
 		return ret;
 	}
+
+	shell_print(sh, "I3C: Dynamic address changed from 0x%02x to 0x%02x", old_da,
+		    desc->dynamic_addr);
 
 	return ret;
 }
@@ -737,7 +729,6 @@ static int cmd_i3c_ccc_getbcr(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_getbcr bcr;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -745,14 +736,13 @@ static int cmd_i3c_ccc_getbcr(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	ret = i3c_ccc_do_getbcr(desc, &bcr);
+	ret = i3c_bus_getbcr(desc);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC GETBCR.");
 		return ret;
 	}
 
-	shell_print(sh, "BCR: 0x%02x", bcr.bcr);
-	desc->bcr = bcr.bcr;
+	shell_print(sh, "I3C: BCR: 0x%02x", desc->bcr);
 
 	return ret;
 }
@@ -762,7 +752,6 @@ static int cmd_i3c_ccc_getdcr(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_getdcr dcr;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -770,14 +759,13 @@ static int cmd_i3c_ccc_getdcr(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	ret = i3c_ccc_do_getdcr(desc, &dcr);
+	ret = i3c_bus_getdcr(desc);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC GETDCR.");
 		return ret;
 	}
 
-	shell_print(sh, "DCR: 0x%02x", dcr.dcr);
-	desc->dcr = dcr.dcr;
+	shell_print(sh, "I3C: DCR: 0x%02x", desc->dcr);
 
 	return ret;
 }
@@ -787,7 +775,6 @@ static int cmd_i3c_ccc_getpid(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_getpid pid;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -795,13 +782,13 @@ static int cmd_i3c_ccc_getpid(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	ret = i3c_ccc_do_getpid(desc, &pid);
+	ret = i3c_bus_getpid(desc);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC GETPID.");
 		return ret;
 	}
 
-	shell_print(sh, "PID: 0x%012llx", sys_get_be48(pid.pid));
+	shell_print(sh, "I3C: PID: 0x%012llx", desc->pid);
 
 	return ret;
 }
@@ -811,7 +798,6 @@ static int cmd_i3c_ccc_getmrl(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_mrl mrl;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -819,19 +805,17 @@ static int cmd_i3c_ccc_getmrl(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	ret = i3c_ccc_do_getmrl(desc, &mrl);
+	ret = i3c_bus_getmrl(desc);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC GETMRL.");
 		return ret;
 	}
 
-	desc->data_length.mrl = mrl.len;
 	if (desc->bcr & I3C_BCR_IBI_PAYLOAD_HAS_DATA_BYTE) {
-		shell_print(sh, "MRL: 0x%04x; IBI Length:0x%02x", mrl.len, mrl.ibi_len);
-		desc->data_length.max_ibi = mrl.ibi_len;
+		shell_print(sh, "I3C: MRL: 0x%04x; IBI Length:0x%02x", desc->data_length.mrl,
+			    desc->data_length.max_ibi);
 	} else {
-		shell_print(sh, "MRL: 0x%04x", mrl.len);
-		desc->data_length.max_ibi = 0;
+		shell_print(sh, "I3C: MRL: 0x%04x", desc->data_length.mrl);
 	}
 
 	return ret;
@@ -842,7 +826,6 @@ static int cmd_i3c_ccc_getmwl(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_mwl mwl;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -850,14 +833,13 @@ static int cmd_i3c_ccc_getmwl(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	ret = i3c_ccc_do_getmwl(desc, &mwl);
+	ret = i3c_bus_getmwl(desc);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC GETMWL.");
 		return ret;
 	}
 
-	shell_print(sh, "MWL: 0x%04x", mwl.len);
-	desc->data_length.mwl = mwl.len;
+	shell_print(sh, "I3C: MWL: 0x%04x", desc->data_length.mwl);
 
 	return ret;
 }
@@ -867,7 +849,8 @@ static int cmd_i3c_ccc_setmrl(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_mrl mrl;
+	uint16_t mrl;
+	uint8_t ibi_len = 0;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -881,20 +864,20 @@ static int cmd_i3c_ccc_setmrl(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	mrl.len = strtol(argv[3], NULL, 16);
+	mrl = strtol(argv[3], NULL, 16);
 	if (argc > 4) {
-		mrl.ibi_len = strtol(argv[4], NULL, 16);
+		ibi_len = strtol(argv[4], NULL, 16);
 	}
 
-	ret = i3c_ccc_do_setmrl(desc, &mrl);
+	ret = i3c_bus_setmrl(desc, mrl, ibi_len);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC SETMRL.");
-		return ret;
-	}
-
-	desc->data_length.mrl = mrl.len;
-	if (argc > 4) {
-		desc->data_length.max_ibi = mrl.ibi_len;
+	} else {
+		if (desc->bcr & I3C_BCR_IBI_PAYLOAD_HAS_DATA_BYTE) {
+			shell_print(sh, "I3C: MRL: 0x%04x; IBI Length:0x%02x", mrl, ibi_len);
+		} else {
+			shell_print(sh, "I3C: MRL: 0x%04x", mrl);
+		}
 	}
 
 	return ret;
@@ -905,7 +888,7 @@ static int cmd_i3c_ccc_setmwl(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_mwl mwl;
+	uint16_t mwl;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -913,15 +896,15 @@ static int cmd_i3c_ccc_setmwl(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	mwl.len = strtol(argv[3], NULL, 16);
+	mwl = strtol(argv[3], NULL, 16);
 
-	ret = i3c_ccc_do_setmwl(desc, &mwl);
+	ret = i3c_bus_setmwl(desc, mwl);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC SETMWL.");
 		return ret;
 	}
 
-	desc->data_length.mwl = mwl.len;
+	shell_print(sh, "I3C: SETMWL: 0x%04x", mwl);
 
 	return ret;
 }
@@ -930,8 +913,8 @@ static int cmd_i3c_ccc_setmwl(const struct shell *sh, size_t argc, char **argv)
 static int cmd_i3c_ccc_setmrl_bc(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev;
-	struct i3c_device_desc *desc;
-	struct i3c_ccc_mrl mrl;
+	uint16_t mrl;
+	uint8_t ibi_len = 0;
 	int ret;
 
 	dev = shell_device_get_binding(argv[ARGV_DEV]);
@@ -940,23 +923,18 @@ static int cmd_i3c_ccc_setmrl_bc(const struct shell *sh, size_t argc, char **arg
 		return -ENODEV;
 	}
 
-	mrl.len = strtol(argv[2], NULL, 16);
+	mrl = strtol(argv[2], NULL, 16);
 	if (argc > 3) {
-		mrl.ibi_len = strtol(argv[3], NULL, 16);
+		ibi_len = strtol(argv[3], NULL, 16);
 	}
 
-	ret = i3c_ccc_do_setmrl_all(dev, &mrl, argc > 3);
+	ret = i3c_bus_setmrl_all(dev, mrl, ibi_len, argc > 3);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC SETMRL BC.");
 		return ret;
 	}
 
-	I3C_BUS_FOR_EACH_I3CDEV(dev, desc) {
-		desc->data_length.mrl = mrl.len;
-		if ((argc > 3) && (desc->bcr & I3C_BCR_IBI_PAYLOAD_HAS_DATA_BYTE)) {
-			desc->data_length.max_ibi = mrl.ibi_len;
-		}
-	}
+	shell_print(sh, "I3C: SETMRL BC Sent");
 
 	return ret;
 }
@@ -965,8 +943,7 @@ static int cmd_i3c_ccc_setmrl_bc(const struct shell *sh, size_t argc, char **arg
 static int cmd_i3c_ccc_setmwl_bc(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev;
-	struct i3c_device_desc *desc;
-	struct i3c_ccc_mwl mwl;
+	uint16_t mwl;
 	int ret;
 
 	dev = shell_device_get_binding(argv[ARGV_DEV]);
@@ -975,21 +952,19 @@ static int cmd_i3c_ccc_setmwl_bc(const struct shell *sh, size_t argc, char **arg
 		return -ENODEV;
 	}
 
-	mwl.len = strtol(argv[3], NULL, 16);
+	mwl = strtol(argv[2], NULL, 16);
 
-	ret = i3c_ccc_do_setmwl_all(dev, &mwl);
+	ret = i3c_bus_setmwl_all(dev, mwl);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC SETMWL BC.");
 		return ret;
 	}
 
-	I3C_BUS_FOR_EACH_I3CDEV(dev, desc) {
-		desc->data_length.mwl = mwl.len;
-	}
+	shell_print(sh, "I3C: SETMWL BC Sent");
 
 	return ret;
 }
-
+#ifdef CONFIG_I3C_TARGET
 /* i3c ccc deftgts <device> */
 static int cmd_i3c_ccc_deftgts(const struct shell *sh, size_t argc, char **argv)
 {
@@ -1013,9 +988,11 @@ static int cmd_i3c_ccc_deftgts(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
+	shell_print(sh, "I3C: DEFTGTS sent");
+
 	return ret;
 }
-
+#endif /* CONFIG_I3C_TARGET */
 /* i3c ccc enttm <device> <defining byte> */
 static int cmd_i3c_ccc_enttm(const struct shell *sh, size_t argc, char **argv)
 {
@@ -1039,13 +1016,12 @@ static int cmd_i3c_ccc_enttm(const struct shell *sh, size_t argc, char **argv)
 
 	return ret;
 }
-
+#ifdef CONFIG_I3C_TARGET
 /* i3c ccc getacccr <device> <target> */
 static int cmd_i3c_ccc_getacccr(const struct shell *sh, size_t argc, char **argv)
 {
 	const struct device *dev, *tdev;
 	struct i3c_device_desc *desc;
-	struct i3c_ccc_address handoff_address;
 	int ret;
 
 	ret = i3c_parse_args(sh, argv, &dev, &tdev, &desc);
@@ -1058,25 +1034,17 @@ static int cmd_i3c_ccc_getacccr(const struct shell *sh, size_t argc, char **argv
 		return -EINVAL;
 	}
 
-	ret = i3c_ccc_do_getacccr(desc, &handoff_address);
+	ret = i3c_bus_getacccr(desc);
 	if (ret < 0) {
 		shell_error(sh, "I3C: unable to send CCC GETACCCR.");
 		return ret;
-	}
-
-	/* Verify Odd Parity and Correct Dynamic Address Reply */
-	if ((i3c_odd_parity(handoff_address.addr >> 1) != (handoff_address.addr & BIT(0))) ||
-	    (handoff_address.addr >> 1 != desc->dynamic_addr)) {
-		shell_error(sh, "I3C: invalid returned address 0x%02x; expected 0x%02x",
-			    handoff_address.addr, desc->dynamic_addr);
-		return -EIO;
 	}
 
 	shell_print(sh, "I3C: Controller Handoff successful");
 
 	return ret;
 }
-
+#endif /* CONFIG_I3C_TARGET */
 /* i3c ccc rstact_bc <device> <defining byte> */
 static int cmd_i3c_ccc_rstact_bc(const struct shell *sh, size_t argc, char **argv)
 {
@@ -1137,7 +1105,6 @@ static int cmd_i3c_ccc_rstact(const struct shell *sh, size_t argc, char **argv)
 
 	return ret;
 }
-
 
 /* i3c ccc enec_bc <device> <defining byte> */
 static int cmd_i3c_ccc_enec_bc(const struct shell *sh, size_t argc, char **argv)
@@ -1476,8 +1443,8 @@ static int cmd_i3c_ccc_getcaps(const struct shell *sh, size_t argc, char **argv)
 	if (argc > 3) {
 		fmt = GETCAPS_FORMAT_2;
 		defbyte = strtol(argv[3], NULL, 16);
-		if (defbyte != GETCAPS_FORMAT_2_TGTCAPS || defbyte != GETCAPS_FORMAT_2_TESTPAT ||
-		    defbyte != GETCAPS_FORMAT_2_CRCAPS || defbyte != GETCAPS_FORMAT_2_VTCAPS ||
+		if (defbyte != GETCAPS_FORMAT_2_TGTCAPS && defbyte != GETCAPS_FORMAT_2_TESTPAT &&
+		    defbyte != GETCAPS_FORMAT_2_CRCAPS && defbyte != GETCAPS_FORMAT_2_VTCAPS &&
 		    defbyte != GETCAPS_FORMAT_2_DBGCAPS) {
 			shell_error(sh, "Invalid defining byte.");
 			return -EINVAL;
@@ -1711,7 +1678,7 @@ static int cmd_i3c_ccc_getmxds(const struct shell *sh, size_t argc, char **argv)
 	if (argc > 3) {
 		fmt = GETMXDS_FORMAT_3;
 		defbyte = strtol(argv[3], NULL, 16);
-		if (defbyte != GETMXDS_FORMAT_3_CRHDLY || defbyte != GETMXDS_FORMAT_3_WRRDTURN) {
+		if (defbyte != GETMXDS_FORMAT_3_CRHDLY && defbyte != GETMXDS_FORMAT_3_WRRDTURN) {
 			shell_error(sh, "Invalid defining byte.");
 			return -EINVAL;
 		}
@@ -1974,8 +1941,9 @@ static int cmd_i3c_i2c_scan(const struct shell *sh, size_t argc, char **argv)
 
 	return 0;
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
 #ifdef CONFIG_I3C_USE_IBI
+#ifdef CONFIG_I3C_CONTROLLER
 /* i3c ibi hj_response <device> <"ack"/"nack"> */
 static int cmd_i3c_ibi_hj_response(const struct shell *sh, size_t argc, char **argv)
 {
@@ -2008,7 +1976,8 @@ static int cmd_i3c_ibi_hj_response(const struct shell *sh, size_t argc, char **a
 
 	return 0;
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#ifdef CONFIG_I3C_TARGET
 /* i3c ibi hj <device> */
 static int cmd_i3c_ibi_hj(const struct shell *sh, size_t argc, char **argv)
 {
@@ -2033,7 +2002,7 @@ static int cmd_i3c_ibi_hj(const struct shell *sh, size_t argc, char **argv)
 
 	return 0;
 }
-
+#ifdef CONFIG_I3C_CONTROLLER
 /* i3c ibi cr <device> */
 static int cmd_i3c_ibi_cr(const struct shell *sh, size_t argc, char **argv)
 {
@@ -2058,7 +2027,7 @@ static int cmd_i3c_ibi_cr(const struct shell *sh, size_t argc, char **argv)
 
 	return 0;
 }
-
+#endif /* CONFIG_I3C_CONTROLLER */
 /* i3c ibi tir <device> [<bytes>]*/
 static int cmd_i3c_ibi_tir(const struct shell *sh, size_t argc, char **argv)
 {
@@ -2094,7 +2063,8 @@ static int cmd_i3c_ibi_tir(const struct shell *sh, size_t argc, char **argv)
 
 	return 0;
 }
-
+#endif /* CONFIG_I3C_TARGET */
+#ifdef CONFIG_I3C_CONTROLLER
 /* i3c ibi enable <device> <target> */
 static int cmd_i3c_ibi_enable(const struct shell *sh, size_t argc, char **argv)
 {
@@ -2140,8 +2110,9 @@ static int cmd_i3c_ibi_disable(const struct shell *sh, size_t argc, char **argv)
 
 	return 0;
 }
-#endif
-
+#endif /* CONFIG_I3C_CONTROLLER */
+#endif /* CONFIG_I3C_USE_IBI */
+#ifdef CONFIG_I3C_CONTROLLER
 static void i3c_device_list_target_name_get(size_t idx, struct shell_static_entry *entry)
 {
 	if (idx < ARRAY_SIZE(i3c_list)) {
@@ -2169,6 +2140,7 @@ static void i3c_device_attached_target_name_get(size_t idx, struct shell_static_
 }
 
 SHELL_DYNAMIC_CMD_CREATE(dsub_i3c_device_attached_name, i3c_device_attached_target_name_get);
+#endif /* CONFIG_I3C_CONTROLLER */
 
 static void i3c_device_name_get(size_t idx, struct shell_static_entry *entry)
 {
@@ -2188,10 +2160,7 @@ SHELL_DYNAMIC_CMD_CREATE(dsub_i3c_device_name, i3c_device_name_get);
 /* L2 I3C IBI Shell Commands*/
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_i3c_ibi_cmds,
-	SHELL_CMD_ARG(hj_response, &dsub_i3c_device_name,
-		      "Set IBI HJ Response\n"
-		      "Usage: ibi hj_response <device> <\"ack\"/\"nack\">",
-		      cmd_i3c_ibi_hj_response, 3, 0),
+#ifdef CONFIG_I3C_TARGET
 	SHELL_CMD_ARG(hj, &dsub_i3c_device_name,
 		      "Send IBI HJ\n"
 		      "Usage: ibi hj <device>",
@@ -2200,10 +2169,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      "Send IBI TIR\n"
 		      "Usage: ibi tir <device> [<byte1>, ...]",
 		      cmd_i3c_ibi_tir, 2, MAX_I3C_BYTES),
+#ifdef CONFIG_I3C_CONTROLLER
 	SHELL_CMD_ARG(cr, &dsub_i3c_device_name,
 		      "Send IBI CR\n"
 		      "Usage: ibi cr <device>",
 		      cmd_i3c_ibi_cr, 2, 0),
+#endif /* CONFIG_I3C_CONTROLLER */
+#endif /* CONFIG_I3C_TARGET */
+#ifdef CONFIG_I3C_CONTROLLER
+	SHELL_CMD_ARG(hj_response, &dsub_i3c_device_name,
+		      "Set IBI HJ Response\n"
+		      "Usage: ibi hj_response <device> <\"ack\"/\"nack\">",
+		      cmd_i3c_ibi_hj_response, 3, 0),
 	SHELL_CMD_ARG(enable, &dsub_i3c_device_attached_name,
 		      "Enable receiving IBI from target\n"
 		      "Usage: ibi enable <device> <target>",
@@ -2212,10 +2189,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      "Disable receiving IBI from target\n"
 		      "Usage: ibi disable <device> <target>",
 		      cmd_i3c_ibi_disable, 3, 0),
+#endif /* CONFIG_I3C_CONTROLLER */
 	SHELL_SUBCMD_SET_END /* Array terminated. */
 );
 #endif
 
+#ifdef CONFIG_I3C_CONTROLLER
 /* L3 I3C HDR DDR Shell Commands*/
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_i3c_hdr_ddr_cmds,
@@ -2243,6 +2222,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 /* L2 I3C CCC Shell Commands*/
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_i3c_ccc_cmds,
+	SHELL_CMD_ARG(rstdaa_dc, &dsub_i3c_device_attached_name,
+		      "Send CCC RSTDAA\n"
+		      "Usage: ccc rstdaa_dc <device> <target>",
+		      cmd_i3c_ccc_rstdaa_dc, 3, 0),
 	SHELL_CMD_ARG(rstdaa, &dsub_i3c_device_name,
 		      "Send CCC RSTDAA\n"
 		      "Usage: ccc rstdaa <device>",
@@ -2299,10 +2282,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      "Send CCC SETMWL BC\n"
 		      "Usage: ccc setmwl_bc <device> <max write length>",
 		      cmd_i3c_ccc_setmwl_bc, 3, 0),
+#ifdef CONFIG_I3C_TARGET
 	SHELL_CMD_ARG(deftgts, &dsub_i3c_device_name,
 		      "Send CCC DEFTGTS\n"
 		      "Usage: ccc deftgts <device>",
 		      cmd_i3c_ccc_deftgts, 2, 0),
+#endif
 	SHELL_CMD_ARG(enttm, &dsub_i3c_device_name,
 		      "Send CCC ENTTM\n"
 		      "Usage: ccc enttm <device> <defining byte>",
@@ -2311,10 +2296,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      "Send CCC RSTACT\n"
 		      "Usage: ccc rstact <device> <target> <\"set\"/\"get\"> <defining byte>",
 		      cmd_i3c_ccc_rstact, 5, 0),
+#ifdef CONFIG_I3C_TARGET
 	SHELL_CMD_ARG(getacccr, &dsub_i3c_device_attached_name,
 		      "Send CCC GETACCCR\n"
 		      "Usage: ccc getacccr <device> <target>",
 		      cmd_i3c_ccc_getacccr, 3, 0),
+#endif /* CONFIG_I3C_TARGET */
 	SHELL_CMD_ARG(rstact_bc, &dsub_i3c_device_name,
 		      "Send CCC RSTACT BC\n"
 		      "Usage: ccc rstact_bc <device> <defining byte>",
@@ -2397,18 +2384,20 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      cmd_i3c_ccc_setvendor_bc, 3, MAX_I3C_BYTES),
 	SHELL_SUBCMD_SET_END /* Array terminated. */
 );
+#endif /* CONFIG_I3C_CONTROLLER */
 
 /* L1 I3C Shell Commands*/
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_i3c_cmds,
+#ifdef CONFIG_I3C_CONTROLLER
 	SHELL_CMD_ARG(info, &dsub_i3c_device_attached_name,
 		      "Get I3C device info\n"
 		      "Usage: info <device> [<target>]",
 		      cmd_i3c_info, 2, 1),
 	SHELL_CMD_ARG(speed, &dsub_i3c_device_name,
 		      "Set I3C device speed\n"
-		      "Usage: speed <device> <speed>",
-		      cmd_i3c_speed, 3, 0),
+		      "Usage: speed <device> <speed> [<od_min high_ns>] [<od_min low_ns>]",
+		      cmd_i3c_speed, 3, 2),
 	SHELL_CMD_ARG(recover, &dsub_i3c_device_name,
 		      "Recover I3C bus\n"
 		      "Usage: recover <device>",
@@ -2461,12 +2450,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      "Send I3C HDR\n"
 		      "Usage: hdr <sub cmd>",
 		      NULL, 3, 0),
+#endif /* CONFIG_I3C_CONTROLLER */
 #ifdef CONFIG_I3C_USE_IBI
 	SHELL_CMD_ARG(ibi, &sub_i3c_ibi_cmds,
 		      "Send I3C IBI\n"
 		      "Usage: ibi <sub cmd>",
 		      NULL, 3, 0),
-#endif
+#endif /* CONFIG_I3C_USE_IBI */
 	SHELL_SUBCMD_SET_END /* Array terminated. */
 );
 

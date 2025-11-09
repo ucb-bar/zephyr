@@ -44,12 +44,8 @@ LOG_MODULE_REGISTER(net_mdns_responder, CONFIG_MDNS_RESPONDER_LOG_LEVEL);
  * address-family-specific variants being of differing sizes. Let's not
  * mess with code (which looks correct), just silence the compiler.
  */
-#ifdef __GNUC__
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Warray-bounds"
-#pragma GCC diagnostic ignored "-Wstringop-overread"
-#endif
+TOOLCHAIN_DISABLE_GCC_WARNING(TOOLCHAIN_WARNING_ARRAY_BOUNDS);
+TOOLCHAIN_DISABLE_GCC_WARNING(TOOLCHAIN_WARNING_STRINGOP_OVERREAD);
 
 extern void dns_dispatcher_svc_handler(struct net_socket_service_event *pev);
 
@@ -119,8 +115,9 @@ static int setup_dst_addr(int sock, sa_family_t family,
 #define DNS_RESOLVER_BUF_CTR	(DNS_RESOLVER_MIN_BUF + \
 				 CONFIG_MDNS_RESOLVER_ADDITIONAL_BUF_CTR)
 
+#define MDNS_RESOLVER_BUF_SIZE CONFIG_MDNS_RESOLVER_BUF_SIZE
 NET_BUF_POOL_DEFINE(mdns_msg_pool, DNS_RESOLVER_BUF_CTR,
-		    DNS_RESOLVER_MAX_BUF_SIZE, 0, NULL);
+		    MDNS_RESOLVER_BUF_SIZE, 0, NULL);
 
 static void create_ipv6_addr(struct sockaddr_in6 *addr)
 {
@@ -161,7 +158,7 @@ static void mark_needs_announce(struct net_if *iface, bool needs_announce)
 #endif /* CONFIG_MDNS_RESPONDER_PROBE */
 
 static void mdns_iface_event_handler(struct net_mgmt_event_callback *cb,
-				     uint32_t mgmt_event, struct net_if *iface)
+				     uint64_t mgmt_event, struct net_if *iface)
 
 {
 	if (mgmt_event == NET_EVENT_IF_UP) {
@@ -241,7 +238,6 @@ static int get_socket(sa_family_t family)
 	ret = zsock_socket(family, SOCK_DGRAM, IPPROTO_UDP);
 	if (ret < 0) {
 		ret = -errno;
-		NET_DBG("Cannot get socket (%d)", ret);
 	}
 
 	return ret;
@@ -278,23 +274,19 @@ static void setup_dns_hdr(uint8_t *buf, uint16_t answers)
 static void add_answer(struct net_buf *query, enum dns_rr_type qtype,
 		       uint32_t ttl, uint16_t addr_len, uint8_t *addr)
 {
-	char *dot = query->data + DNS_MSG_HEADER_SIZE;
-	char *prev = NULL;
+	char *dot = query->data + DNS_MSG_HEADER_SIZE + 1;
+	char *prev = query->data + DNS_MSG_HEADER_SIZE;
 	uint16_t offset;
 
-	while ((dot = strchr(dot, '.'))) {
-		if (!prev) {
-			prev = dot++;
-			continue;
-		}
+	/* For the length of the first label. */
+	query->len += 1;
 
+	while ((dot = strchr(dot, '.')) != NULL) {
 		*prev = dot - prev - 1;
 		prev = dot++;
 	}
 
-	if (prev) {
-		*prev = strlen(prev) - 1;
-	}
+	*prev = strlen(prev + 1);
 
 	/* terminator byte (0x00) */
 	query->len += 1;
@@ -326,14 +318,15 @@ static int create_answer(int sock,
 	/* Prepare the response into the query buffer: move the name
 	 * query buffer has to get enough free space: dns_hdr + answer
 	 */
-	if ((net_buf_max_len(query) - query->len) < (DNS_MSG_HEADER_SIZE +
+	if ((net_buf_max_len(query) - query->len) < (DNS_MSG_HEADER_SIZE + 1 +
 					  DNS_QTYPE_LEN + DNS_QCLASS_LEN +
 					  DNS_TTL_LEN + DNS_RDLENGTH_LEN +
 					  addr_len)) {
 		return -ENOBUFS;
 	}
 
-	memmove(query->data + DNS_MSG_HEADER_SIZE, query->data, query->len);
+	/* +1 for the initial label length */
+	memmove(query->data + DNS_MSG_HEADER_SIZE + 1, query->data, query->len);
 
 	setup_dns_hdr(query->data, 1);
 
@@ -600,7 +593,7 @@ static int dns_read(int sock,
 	int queries;
 	int ret;
 
-	data_len = MIN(len, DNS_RESOLVER_MAX_BUF_SIZE);
+	data_len = MIN(len, MDNS_RESOLVER_BUF_SIZE);
 
 	/* Store the DNS query name into a temporary net_buf, which will be
 	 * eventually used to send a response
@@ -645,7 +638,7 @@ static int dns_read(int sock,
 		}
 
 		/* Handle only .local queries */
-		lquery = strrchr(result->data + 1, '.');
+		lquery = strrchr(result->data, '.');
 		if (!lquery || memcmp(lquery, (const void *){ ".local" }, 7)) {
 			continue;
 		}
@@ -658,9 +651,9 @@ static int dns_read(int sock,
 		 * We skip the first dot, and make sure there is dot after
 		 * matching hostname.
 		 */
-		if (!strncasecmp(hostname, result->data + 1, hostname_len) &&
-		    (result->len - 1) >= hostname_len &&
-		    &(result->data + 1)[hostname_len] == lquery) {
+		if (!strncasecmp(hostname, result->data, hostname_len) &&
+		    (result->len) >= hostname_len &&
+		    &result->data[hostname_len] == lquery) {
 			NET_DBG("%s %s %s to our hostname %s%s", "mDNS",
 				family == AF_INET ? "IPv4" : "IPv6", "query",
 				hostname, ".local");
@@ -963,7 +956,7 @@ static void probing(struct k_work *work)
 }
 
 static void mdns_addr_event_handler(struct net_mgmt_event_callback *cb,
-				    uint32_t mgmt_event, struct net_if *iface)
+				    uint64_t mgmt_event, struct net_if *iface)
 {
 	uint32_t probe_delay = sys_rand32_get() % 250;
 	bool probe_started = false;
@@ -1094,7 +1087,7 @@ static void mdns_addr_event_handler(struct net_mgmt_event_callback *cb,
 			}
 
 			ret = k_work_reschedule_for_queue(&mdns_work_q,
-							  &v4_ctx[i].probe_timer,
+							  &v6_ctx[i].probe_timer,
 							  K_MSEC(probe_delay));
 			if (ret < 0) {
 				NET_DBG("Cannot schedule %s probe work (%d)", "IPv6", ret);
@@ -1115,7 +1108,7 @@ static void mdns_addr_event_handler(struct net_mgmt_event_callback *cb,
 }
 
 static void mdns_conn_event_handler(struct net_mgmt_event_callback *cb,
-				    uint32_t mgmt_event, struct net_if *iface)
+				    uint64_t mgmt_event, struct net_if *iface)
 {
 	if (mgmt_event == NET_EVENT_L4_DISCONNECTED) {
 		/* Clear the failed probes counter so that we can start
@@ -1348,9 +1341,9 @@ static int init_listener(void)
 
 		v6 = get_socket(AF_INET6);
 		if (v6 < 0) {
-			NET_ERR("Cannot get %s socket (%d %s interfaces). Max sockets is %d",
+			NET_ERR("Cannot get %s socket (%d %s interfaces). Max sockets is %d (%d)",
 				"IPv6", MAX_IPV6_IFACE_COUNT,
-				"IPv6", CONFIG_NET_MAX_CONTEXTS);
+				"IPv6", CONFIG_NET_MAX_CONTEXTS, v6);
 			continue;
 		}
 
@@ -1368,7 +1361,8 @@ static int init_listener(void)
 				ifindex, ret);
 		} else {
 			memset(&if_req, 0, sizeof(if_req));
-			strncpy(if_req.ifr_name, name, sizeof(if_req.ifr_name) - 1);
+			memcpy(if_req.ifr_name, name,
+			       MIN(sizeof(name) - 1, sizeof(if_req.ifr_name) - 1));
 
 			ret = zsock_setsockopt(v6, SOL_SOCKET, SO_BINDTODEVICE,
 					       &if_req, sizeof(if_req));
@@ -1444,9 +1438,9 @@ static int init_listener(void)
 
 		v4 = get_socket(AF_INET);
 		if (v4 < 0) {
-			NET_ERR("Cannot get %s socket (%d %s interfaces). Max sockets is %d",
+			NET_ERR("Cannot get %s socket (%d %s interfaces). Max sockets is %d (%d)",
 				"IPv4", MAX_IPV4_IFACE_COUNT,
-				"IPv4", CONFIG_NET_MAX_CONTEXTS);
+				"IPv4", CONFIG_NET_MAX_CONTEXTS, v4);
 			continue;
 		}
 
@@ -1464,7 +1458,8 @@ static int init_listener(void)
 				ifindex, ret);
 		} else {
 			memset(&if_req, 0, sizeof(if_req));
-			strncpy(if_req.ifr_name, name, sizeof(if_req.ifr_name) - 1);
+			memcpy(if_req.ifr_name, name,
+			       MIN(sizeof(name) - 1, sizeof(if_req.ifr_name) - 1));
 
 			ret = zsock_setsockopt(v4, SOL_SOCKET, SO_BINDTODEVICE,
 					       &if_req, sizeof(if_req));
@@ -1826,7 +1821,7 @@ static void do_init_listener(struct k_work *work)
 
 static int mdns_responder_init(void)
 {
-	uint32_t flags = NET_EVENT_IF_UP;
+	uint64_t flags = NET_EVENT_IF_UP;
 	external_records = NULL;
 	external_records_count = 0;
 

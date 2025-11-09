@@ -141,8 +141,10 @@ do {                                                                    \
 #define __ramfunc __attribute__((noinline, section(".ramfunc")))
 #endif /* !CONFIG_XIP */
 
+#ifndef __fallthrough
 /* TG-WG: ICCARM does not support __fallthrough */
 #define __fallthrough  [[fallthrough]]
+#endif
 
 #ifndef __packed
 #define __packed        __attribute__((__packed__))
@@ -183,6 +185,11 @@ do {                                                                    \
 
 #ifndef __deprecated
 #define __deprecated	__attribute__((deprecated))
+#endif
+
+#ifndef __deprecated_version
+#define __deprecated_version(version) \
+	__attribute__((deprecated("planned removal in v" #version)))
 #endif
 
 #define FUNC_NO_STACK_PROTECTOR _Pragma("no_stack_protect")
@@ -241,9 +248,13 @@ do {                                                                    \
 #define __WARN1(s) __PRAGMA(message = #s)
 
 /* Generic message */
-#ifndef __DEPRECATED_MACRO
+#ifndef CONFIG_DEPRECATION_TEST
 #define __DEPRECATED_MACRO __WARN("Macro is deprecated")
+#else
+#define __DEPRECATED_MACRO
 #endif
+
+
 
 /* These macros allow having ARM asm functions callable from thumb */
 
@@ -313,49 +324,6 @@ do {                                                                    \
 #define compiler_barrier() do { \
 	__asm volatile("" ::: "memory"); \
 } while (false)
-
-/** @brief Return larger value of two provided expressions.
- *
- * Macro ensures that expressions are evaluated only once.
- *
- * @note Macro has limited usage compared to the standard macro as it cannot be
- *	 used:
- *	 - to generate constant integer, e.g. __aligned(Z_MAX(4,5))
- *	 - static variable, e.g. array like static uint8_t array[Z_MAX(...)];
- */
-#define Z_MAX(a, b) ({ \
-		/* random suffix to avoid naming conflict */ \
-		__typeof__(a) _value_a_ = (a); \
-		__typeof__(b) _value_b_ = (b); \
-		_value_a_ > _value_b_ ? _value_a_ : _value_b_; \
-	})
-
-/** @brief Return smaller value of two provided expressions.
- *
- * Macro ensures that expressions are evaluated only once. See @ref Z_MAX for
- * macro limitations.
- */
-#define Z_MIN(a, b) ({ \
-		/* random suffix to avoid naming conflict */ \
-		__typeof__(a) _value_a_ = (a); \
-		__typeof__(b) _value_b_ = (b); \
-		_value_a_ < _value_b_ ? _value_a_ : _value_b_; \
-	})
-
-/** @brief Return a value clamped to a given range.
- *
- * Macro ensures that expressions are evaluated only once. See @ref Z_MAX for
- * macro limitations.
- */
-#define Z_CLAMP(val, low, high) ({                                             \
-		/* random suffix to avoid naming conflict */                   \
-		__typeof__(val) _value_val_ = (val);                           \
-		__typeof__(low) _value_low_ = (low);                           \
-		__typeof__(high) _value_high_ = (high);                        \
-		(_value_val_ < _value_low_)  ? _value_low_ :                   \
-		(_value_val_ > _value_high_) ? _value_high_ :                  \
-					       _value_val_;                    \
-	})
 
 /**
  * @brief Calculate power of two ceiling for some nonzero value

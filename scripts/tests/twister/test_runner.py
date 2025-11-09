@@ -7,34 +7,26 @@ Tests for runner.py classes
 """
 
 import errno
-import mock
 import os
 import pathlib
-import pytest
-import queue
 import re
 import subprocess
 import sys
-import yaml
-
+from collections import deque
 from contextlib import nullcontext
-from elftools.elf.sections import SymbolTableSection
 from typing import List
+from unittest import mock
 
-ZEPHYR_BASE = os.getenv("ZEPHYR_BASE")
-sys.path.insert(0, os.path.join(ZEPHYR_BASE, "scripts/pylib/twister"))
-
-from twisterlib.statuses import TwisterStatus
+import pytest
+import yaml
+from elftools.elf.sections import SymbolTableSection
 from twisterlib.error import BuildError
 from twisterlib.harness import Pytest
+from twisterlib.runner import CMake, ExecutionCounter, FilterBuilder, ProjectBuilder, TwisterRunner
+from twisterlib.statuses import TwisterStatus
 
-from twisterlib.runner import (
-    CMake,
-    ExecutionCounter,
-    FilterBuilder,
-    ProjectBuilder,
-    TwisterRunner
-)
+from . import ZEPHYR_BASE
+
 
 @pytest.fixture
 def mocked_instance(tmp_path):
@@ -558,19 +550,6 @@ TESTDATA_3 = [
         {os.path.join('other', 'zephyr', 'dummy.testsuite.name'): False}
     ),
     (
-        'other', ['other'], True,
-        False, None, True,
-        'Dummy parse results', True,
-        None,
-        None,
-        {},
-        {},
-        {},
-        None,
-        ['Sysbuild test will be skipped. West must be used for flashing.'],
-        {os.path.join('other', 'zephyr', 'dummy.testsuite.name'): True}
-    ),
-    (
         'other', ['other'], False,
         True, None, False,
         'Dummy parse results', True,
@@ -652,8 +631,7 @@ TESTDATA_3 = [
     ' expected_edt,' \
     ' expected_logs, expected_return',
     TESTDATA_3,
-    ids=['unit testing', 'domain', 'kconfig', 'no cache',
-         'no west options', 'no edt',
+    ids=['unit testing', 'domain', 'kconfig', 'no cache', 'no edt',
          'parse result', 'no parse result', 'no testsuite filter', 'parse err']
 )
 def test_filterbuilder_parse_generated(
@@ -1504,7 +1482,7 @@ def test_projectbuilder_process(
     expected_skipped,
     expected_missing
 ):
-    def mock_pipeline_put(msg):
+    def mock_processing_queue_append(msg):
         if isinstance(pipeline_runtime_error, type) and \
            issubclass(pipeline_runtime_error, Exception):
             raise RuntimeError('Pipeline Error!')
@@ -1544,8 +1522,8 @@ def test_projectbuilder_process(
     pb.run = mock.Mock()
     pb.gather_metrics = mock.Mock(return_value=metrics_res)
 
-    pipeline_mock = mock.Mock(put=mock.Mock(side_effect=mock_pipeline_put))
-    done_mock = mock.Mock()
+    processing_queue_mock = mock.Mock(append=mock.Mock(side_effect=mock_processing_queue_append))
+    processing_ready_mock = mock.Mock()
     lock_mock = mock.Mock(
         __enter__=mock.Mock(return_value=(mock.Mock(), mock.Mock())),
         __exit__=mock.Mock(return_value=None)
@@ -1553,12 +1531,12 @@ def test_projectbuilder_process(
     results_mock = mock.Mock()
     results_mock.filtered_runtime = 0
 
-    pb.process(pipeline_mock, done_mock, message, lock_mock, results_mock)
+    pb.process(processing_queue_mock, processing_ready_mock, message, lock_mock, results_mock)
 
     assert all([log in caplog.text for log in expected_logs])
 
     if resulting_message:
-        pipeline_mock.put.assert_called_with(resulting_message)
+        processing_queue_mock.append.assert_called_with(resulting_message)
 
     assert pb.instance.status == expected_status
     assert pb.instance.reason == expected_reason
@@ -2411,7 +2389,6 @@ def test_projectbuilder_gather_metrics(
         assert instance_mock.metrics['used_rom'] == 0
         assert instance_mock.metrics['available_rom'] == 0
         assert instance_mock.metrics['available_ram'] == 0
-        assert instance_mock.metrics['unrecognized'] == []
 
 
 TESTDATA_16 = [
@@ -2463,15 +2440,12 @@ def test_projectbuilder_calc_size(
                size_calc_mock.get_available_rom()
         assert instance_mock.metrics['available_ram'] == \
                size_calc_mock.get_available_ram()
-        assert instance_mock.metrics['unrecognized'] == \
-               size_calc_mock.unrecognized_sections()
 
     if expect_zeroes:
         assert instance_mock.metrics['used_ram'] == 0
         assert instance_mock.metrics['used_rom'] == 0
         assert instance_mock.metrics['available_rom'] == 0
         assert instance_mock.metrics['available_ram'] == 0
-        assert instance_mock.metrics['unrecognized'] == []
 
     if expect_calcs or expect_zeroes:
         assert instance_mock.metrics['handler_time'] == \
@@ -2531,24 +2505,25 @@ def test_twisterrunner_run(
     jobclient_mock = mock.Mock()
     jobclient_mock().name='JobClient'
 
-    pipeline_q = queue.LifoQueue()
-    done_q = queue.LifoQueue()
-    done_instance = mock.Mock(
-        metrics={'k2': 'v2'},
+    processing_queue = deque()
+    processing_ready = {}
+    processing_instance = mock.Mock(
+        metrics={'k': 'v2'},
         execution_time=30
     )
-    done_instance.name='dummy instance'
-    done_q.put(done_instance)
+    processing_instance.name='dummy instance'
+    processing_ready[processing_instance.name] = processing_instance
     manager_mock = mock.Mock()
-    manager_mock().LifoQueue = mock.Mock(
-        side_effect=iter([pipeline_q, done_q])
-    )
+    manager_mock().deque = mock.Mock(return_value=processing_queue)
+    manager_mock().get_dict = mock.Mock(return_value=processing_ready)
 
     results_mock = mock.Mock()
     results_mock().error = 1
     results_mock().iteration = 0
     results_mock().failed = 2
     results_mock().total = 9
+    results_mock().filtered_static = 0
+    results_mock().skipped = 0
 
     def iteration_increment(value=1, decrement=False):
         results_mock().iteration += value * (-1 if decrement else 1)
@@ -2572,10 +2547,8 @@ def test_twisterrunner_run(
     assert tr.jobserver.name == expected_jobserver
 
     assert tr.instances['dummy instance'].metrics == {
-        'k': 'v',
-        'k2': 'v2',
-        'handler_time': 30,
-        'unrecognized': []
+        'k': 'v2',
+        'handler_time': 30
     }
 
     assert results_mock().error == 0
@@ -2613,7 +2586,7 @@ def test_twisterrunner_update_counting_before_pipeline():
         ),
         'dummy5': mock.Mock(
             status=TwisterStatus.SKIP,
-            reason=None,
+            reason="Quarantine",
             testsuite=mock.Mock(
                 testcases=[mock.Mock()]
             )
@@ -2634,6 +2607,7 @@ def test_twisterrunner_update_counting_before_pipeline():
         error = 0,
         cases = 0,
         filtered_cases = 0,
+        skipped = 0,
         skipped_cases = 0,
         failed_cases = 0,
         error_cases = 0,
@@ -2657,14 +2631,22 @@ def test_twisterrunner_update_counting_before_pipeline():
     def filtered_cases_increment(value=1, decrement=False):
         tr.results.filtered_cases += value * (-1 if decrement else 1)
     tr.results.filtered_cases_increment = filtered_cases_increment
+    def skipped_increment(value=1, decrement=False):
+        tr.results.skipped += value * (-1 if decrement else 1)
+    tr.results.skipped_increment = skipped_increment
+    def skipped_cases_increment(value=1, decrement=False):
+        tr.results.skipped_cases += value * (-1 if decrement else 1)
+    tr.results.skipped_cases_increment = skipped_cases_increment
 
     tr.update_counting_before_pipeline()
 
     assert tr.results.filtered_static == 1
     assert tr.results.filtered_configs == 1
     assert tr.results.filtered_cases == 4
-    assert tr.results.cases == 4
+    assert tr.results.cases == 5
     assert tr.results.error == 1
+    assert tr.results.skipped == 1
+    assert tr.results.skipped_cases == 1
 
 
 def test_twisterrunner_show_brief(caplog):
@@ -2743,10 +2725,10 @@ def test_twisterrunner_add_tasks_to_queue(
     )
     tr.results = mock.Mock(iteration=0)
 
-    pipeline_mock = mock.Mock()
+    processing_queue_mock = mock.Mock()
 
     tr.add_tasks_to_queue(
-        pipeline_mock,
+        processing_queue_mock,
         build_only,
         test_only,
         retry_build_errors
@@ -2760,10 +2742,10 @@ def test_twisterrunner_add_tasks_to_queue(
     if retry_build_errors:
         tr.get_cmake_filter_stages.assert_any_call('some', mock.ANY)
 
-    print(pipeline_mock.put.call_args_list)
+    print(processing_queue_mock.append.call_args_list)
     print([mock.call(el) for el in expected_pipeline_elements])
 
-    assert pipeline_mock.put.call_args_list == \
+    assert processing_queue_mock.append.call_args_list == \
            [mock.call(el) for el in expected_pipeline_elements]
 
 
@@ -2778,12 +2760,12 @@ TESTDATA_19 = [
 )
 def test_twisterrunner_pipeline_mgr(mocked_jobserver, platform):
     counter = 0
-    def mock_get_nowait():
+    def mock_pop():
         nonlocal counter
         counter += 1
         if counter > 5:
-            raise queue.Empty()
-        return {'test': 'dummy'}
+            raise IndexError
+        return {'test': mock.Mock(required_applications=[])}
 
     instances = {}
     suites = []
@@ -2796,16 +2778,16 @@ def test_twisterrunner_pipeline_mgr(mocked_jobserver, platform):
         )
     )
 
-    pipeline_mock = mock.Mock()
-    pipeline_mock.get_nowait = mock.Mock(side_effect=mock_get_nowait)
-    done_queue_mock = mock.Mock()
+    processing_queue_mock = mock.Mock()
+    processing_queue_mock.pop = mock.Mock(side_effect=mock_pop)
+    processing_ready_mock = mock.Mock()
     lock_mock = mock.Mock()
     results_mock = mock.Mock()
 
     with mock.patch('sys.platform', platform), \
          mock.patch('twisterlib.runner.ProjectBuilder',\
                     return_value=mock.Mock()) as pb:
-        tr.pipeline_mgr(pipeline_mock, done_queue_mock, lock_mock, results_mock)
+        tr.pipeline_mgr(processing_queue_mock, processing_ready_mock, lock_mock, results_mock)
 
     assert len(pb().process.call_args_list) == 5
 
@@ -2863,3 +2845,134 @@ def test_twisterrunner_get_cmake_filter_stages(filter, expected_result):
     result = TwisterRunner.get_cmake_filter_stages(filter, ['not', 'and'])
 
     assert sorted(result) == sorted(expected_result)
+
+
+@pytest.mark.parametrize(
+    'required_apps, processing_ready_keys, expected_result',
+    [
+        (['app1', 'app2'], ['app1', 'app2'], True),  # all apps ready
+        (['app1', 'app2', 'app3'], ['app1', 'app2'], False),  # some apps missing
+        ([], [], True),  # no required apps
+        (['app1'], [], False),  # single app missing
+    ],
+    ids=['all_ready', 'some_missing', 'no_apps', 'single_missing']
+)
+def test_twisterrunner_are_required_apps_ready(required_apps, processing_ready_keys, expected_result):
+    """Test _are_required_apps_ready method with various scenarios"""
+    instances = {}
+    suites = []
+    env_mock = mock.Mock()
+    tr = TwisterRunner(instances, suites, env=env_mock)
+
+    instance_mock = mock.Mock()
+    instance_mock.required_applications = required_apps
+
+    processing_ready = {key: mock.Mock() for key in processing_ready_keys}
+
+    result = tr._are_required_apps_ready(instance_mock, processing_ready)
+
+    assert result is expected_result
+
+
+@pytest.mark.parametrize(
+    'app_statuses, expected_result',
+    [
+        ([TwisterStatus.PASS, TwisterStatus.PASS], True),  # all passed
+        ([TwisterStatus.NOTRUN, TwisterStatus.NOTRUN], True),  # all notrun
+        ([TwisterStatus.PASS, TwisterStatus.NOTRUN], True),  # mixed pass/notrun
+        ([TwisterStatus.PASS, TwisterStatus.FAIL], False),  # one failed
+        ([TwisterStatus.ERROR], False),  # single error
+    ],
+    ids=['all_pass', 'all_notrun', 'mixed_pass_notrun', 'one_fail', 'single_error']
+)
+def test_twisterrunner_are_all_required_apps_success(app_statuses, expected_result):
+    """Test _are_all_required_apps_success method with various app statuses"""
+    instances = {}
+    suites = []
+    env_mock = mock.Mock()
+    tr = TwisterRunner(instances, suites, env=env_mock)
+
+    instance_mock = mock.Mock()
+    required_apps = [f'app{i + 1}' for i in range(len(app_statuses))]
+    instance_mock.required_applications = required_apps
+
+    processing_ready = {}
+    for i, status in enumerate(app_statuses):
+        app_instance = mock.Mock()
+        app_instance.status = status
+        app_instance.reason = f"Reason for app{i + 1}"
+        processing_ready[f'app{i + 1}'] = app_instance
+
+    result = tr._are_all_required_apps_success(instance_mock, processing_ready)
+    assert result is expected_result
+
+
+@pytest.mark.parametrize(
+    'required_apps, ready_apps, expected_result, expected_actions',
+    [
+        ([], {}, True,
+         {'requeue': False, 'skip': False, 'build_dirs': 0}),
+        (['app1'], {}, False,
+         {'requeue': True, 'skip': False, 'build_dirs': 0}),
+        (['app1', 'app2'], {'app1': TwisterStatus.PASS}, False,
+         {'requeue': True, 'skip': False, 'build_dirs': 0}),
+        (['app1'], {'app1': TwisterStatus.FAIL}, False,
+         {'requeue': False, 'skip': True, 'build_dirs': 0}),
+        (['app1', 'app2'], {'app1': TwisterStatus.PASS, 'app2': TwisterStatus.NOTRUN}, True,
+         {'requeue': False, 'skip': False, 'build_dirs': 2}),
+    ],
+    ids=['no_apps', 'not_ready_single_job', 'not_ready_multi_job',
+         'apps_failed', 'apps_success']
+)
+def test_twisterrunner_are_required_apps_processed(required_apps, ready_apps,
+                                                   expected_result, expected_actions):
+    """Test are_required_apps_processed method with various scenarios"""
+    # Setup TwisterRunner instances dict
+    tr_instances = {}
+    for app_name in required_apps:
+        tr_instances[app_name] = mock.Mock(build_dir=f'/path/to/{app_name}')
+
+    env_mock = mock.Mock()
+    tr = TwisterRunner(tr_instances, [], env=env_mock)
+    tr.jobs = 1
+
+    instance_mock = mock.Mock()
+    instance_mock.required_applications = required_apps[:]
+    instance_mock.required_build_dirs = []
+
+    # Setup testcases for skip scenarios
+    if expected_actions['skip']:
+        testcase_mock = mock.Mock()
+        instance_mock.testcases = [testcase_mock]
+
+    # Setup processing_ready with app instances
+    processing_ready = {}
+    for app_name, status in ready_apps.items():
+        app_instance = mock.Mock()
+        app_instance.status = status
+        app_instance.reason = f"Reason for {app_name}"
+        app_instance.build_dir = f'/path/to/{app_name}'
+        processing_ready[app_name] = app_instance
+
+    processing_queue = deque()
+    task = {'test': instance_mock}
+
+    result = tr.are_required_apps_processed(instance_mock, processing_queue, processing_ready, task)
+
+    assert result is expected_result
+
+    if expected_actions['requeue']:
+        assert len(processing_queue) == 1
+        assert processing_queue[0] == task
+
+    if expected_actions['skip']:
+        assert instance_mock.status == TwisterStatus.SKIP
+        assert instance_mock.reason == "Required application failed"
+        assert instance_mock.required_applications == []
+        assert instance_mock.testcases[0].status == TwisterStatus.SKIP
+        # Check for report task in queue
+        assert any(item.get('op') == 'report' for item in processing_queue)
+
+    assert len(instance_mock.required_build_dirs) == expected_actions['build_dirs']
+    if expected_actions['build_dirs'] > 0:
+        assert instance_mock.required_applications == []

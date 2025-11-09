@@ -1,7 +1,7 @@
 # Copyright 2025 NXP
 # SPDX-License-Identifier: Apache-2.0
 
-if SOC_MIMX9131
+if SOC_MIMX9131 || SOC_MIMX9111
 
 # Workaround for not being able to have commas in macro arguments
 DT_CHOSEN_Z_FLASH := zephyr,flash
@@ -17,5 +17,11 @@ config NUM_IRQS
 
 config SYS_CLOCK_HW_CYCLES_PER_SEC
 	default 24000000
+
+# Disable data cache until MMU is enabled when booting from EL2
+config ARM64_DCACHE_ALL_OPS
+	default y
+config ARM64_BOOT_DISABLE_DCACHE
+	default y
 
 endif

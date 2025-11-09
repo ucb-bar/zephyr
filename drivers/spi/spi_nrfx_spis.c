@@ -8,6 +8,7 @@
 #include <zephyr/drivers/spi/rtio.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/gpio.h>
+#include <dmm.h>
 #include <soc.h>
 #include <nrfx_spis.h>
 #include <zephyr/pm/device.h>
@@ -19,10 +20,56 @@ LOG_MODULE_REGISTER(spi_nrfx_spis, CONFIG_SPI_LOG_LEVEL);
 
 #include "spi_context.h"
 
+#if NRF_DT_INST_ANY_IS_FAST
+/* If fast instances are used then system managed device PM cannot be used because
+ * it may call PM actions from locked context and fast SPIM PM actions can only be
+ * called from a thread context.
+ */
+BUILD_ASSERT(!IS_ENABLED(CONFIG_PM_DEVICE_SYSTEM_MANAGED));
+#endif
+
+/*
+ * Current factors requiring use of DT_NODELABEL:
+ *
+ * - HAL design (requirement of drv_inst_idx in nrfx_spis_t)
+ * - Name-based HAL IRQ handlers, e.g. nrfx_spis_0_irq_handler
+ */
+#define SPIS_NODE(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_NODELABEL(spis##idx)), (spis##idx), (spi##idx))
+#define SPIS(idx) DT_NODELABEL(SPIS_NODE(idx))
+#define SPIS_PROP(idx, prop) DT_PROP(SPIS(idx), prop)
+#define SPIS_HAS_PROP(idx, prop) DT_NODE_HAS_PROP(SPIS(idx), prop)
+#define SPIS_IS_FAST(idx) NRF_DT_IS_FAST(SPIS(idx))
+
+#define SPIS_PINS_CROSS_DOMAIN(unused, prefix, idx, _)			\
+	COND_CODE_1(DT_NODE_HAS_STATUS_OKAY(SPIS(prefix##idx)),		\
+		   (SPIS_PROP(idx, cross_domain_pins_supported)),	\
+		   (0))
+
+#if NRFX_FOREACH_PRESENT(SPIS, SPIS_PINS_CROSS_DOMAIN, (||), (0))
+#include <hal/nrf_gpio.h>
+/* Certain SPIM instances support usage of cross domain pins in form of dedicated pins on
+ * a port different from the default one.
+ */
+#define SPIS_CROSS_DOMAIN_SUPPORTED 1
+#endif
+
+#if SPIS_CROSS_DOMAIN_SUPPORTED && defined(CONFIG_NRF_SYS_EVENT)
+#include <nrf_sys_event.h>
+/* To use cross domain pins, constant latency mode needs to be applied, which is
+ * handled via nrf_sys_event requests.
+ */
+#define SPIS_CROSS_DOMAIN_PINS_HANDLE 1
+#endif
+
 struct spi_nrfx_data {
 	struct spi_context ctx;
 	const struct device *dev;
+#ifdef CONFIG_MULTITHREADING
 	struct k_sem wake_sem;
+#else
+	atomic_t woken_up;
+#endif
 	struct gpio_callback wake_cb_data;
 };
 
@@ -33,7 +80,38 @@ struct spi_nrfx_config {
 	uint16_t max_buf_len;
 	const struct pinctrl_dev_config *pcfg;
 	struct gpio_dt_spec wake_gpio;
+	void *mem_reg;
+#if SPIS_CROSS_DOMAIN_SUPPORTED
+	bool cross_domain;
+	int8_t default_port;
+#endif
 };
+
+#if SPIS_CROSS_DOMAIN_SUPPORTED
+static bool spis_has_cross_domain_connection(const struct spi_nrfx_config *config)
+{
+	const struct pinctrl_dev_config *pcfg = config->pcfg;
+	const struct pinctrl_state *state;
+	int ret;
+
+	ret = pinctrl_lookup_state(pcfg, PINCTRL_STATE_DEFAULT, &state);
+	if (ret < 0) {
+		LOG_ERR("Unable to read pin state");
+		return false;
+	}
+
+	for (uint8_t i = 0U; i < state->pin_cnt; i++) {
+		uint32_t pin = NRF_GET_PIN(state->pins[i]);
+
+		if ((pin != NRF_PIN_DISCONNECTED) &&
+		    (nrf_gpio_pin_port_number_extract(&pin) != config->default_port)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+#endif
 
 static inline nrf_spis_mode_t get_nrf_spis_mode(uint16_t operation)
 {
@@ -118,7 +196,11 @@ static int prepare_for_transfer(const struct device *dev,
 				uint8_t *rx_buf, size_t rx_buf_len)
 {
 	const struct spi_nrfx_config *dev_config = dev->config;
+	struct spi_nrfx_data *dev_data = dev->data;
 	nrfx_err_t result;
+	uint8_t *dmm_tx_buf;
+	uint8_t *dmm_rx_buf;
+	int err;
 
 	if (tx_buf_len > dev_config->max_buf_len ||
 	    rx_buf_len > dev_config->max_buf_len) {
@@ -127,14 +209,36 @@ static int prepare_for_transfer(const struct device *dev,
 		return -EINVAL;
 	}
 
+	err = dmm_buffer_out_prepare(dev_config->mem_reg, tx_buf, tx_buf_len, (void **)&dmm_tx_buf);
+	if (err != 0) {
+		LOG_ERR("DMM TX allocation failed err=%d", err);
+		goto out_alloc_failed;
+	}
+
+	/* Keep user RX buffer address to copy data from DMM RX buffer on transfer completion. */
+	dev_data->ctx.rx_buf = rx_buf;
+	err = dmm_buffer_in_prepare(dev_config->mem_reg, rx_buf, rx_buf_len, (void **)&dmm_rx_buf);
+	if (err != 0) {
+		LOG_ERR("DMM RX allocation failed err=%d", err);
+		goto in_alloc_failed;
+	}
+
 	result = nrfx_spis_buffers_set(&dev_config->spis,
-				       tx_buf, tx_buf_len,
-				       rx_buf, rx_buf_len);
+				       dmm_tx_buf, tx_buf_len,
+				       dmm_rx_buf, rx_buf_len);
 	if (result != NRFX_SUCCESS) {
-		return -EIO;
+		err = -EIO;
+		goto buffers_set_failed;
 	}
 
 	return 0;
+
+buffers_set_failed:
+	dmm_buffer_in_release(dev_config->mem_reg, rx_buf, rx_buf_len, dmm_rx_buf);
+in_alloc_failed:
+	dmm_buffer_out_release(dev_config->mem_reg, (void *)dmm_tx_buf);
+out_alloc_failed:
+	return err;
 }
 
 static void wake_callback(const struct device *dev, struct gpio_callback *cb,
@@ -146,7 +250,11 @@ static void wake_callback(const struct device *dev, struct gpio_callback *cb,
 
 	(void)gpio_pin_interrupt_configure_dt(&dev_config->wake_gpio,
 					      GPIO_INT_DISABLE);
+#ifdef CONFIG_MULTITHREADING
 	k_sem_give(&dev_data->wake_sem);
+#else
+	atomic_set(&dev_data->woken_up, 1);
+#endif /* CONFIG_MULTITHREADING */
 }
 
 static void wait_for_wake(struct spi_nrfx_data *dev_data,
@@ -159,7 +267,19 @@ static void wait_for_wake(struct spi_nrfx_data *dev_data,
 			     dev_config->wake_gpio.pin) == 0) {
 		(void)gpio_pin_interrupt_configure_dt(&dev_config->wake_gpio,
 						      GPIO_INT_LEVEL_HIGH);
+#ifdef CONFIG_MULTITHREADING
 		(void)k_sem_take(&dev_data->wake_sem, K_FOREVER);
+#else
+		unsigned int key = irq_lock();
+
+		while (!atomic_get(&dev_data->woken_up)) {
+			k_cpu_atomic_idle(key);
+			key = irq_lock();
+		}
+
+		dev_data->woken_up = 0;
+		irq_unlock(key);
+#endif /* CONFIG_MULTITHREADING */
 	}
 }
 
@@ -281,13 +401,26 @@ static DEVICE_API(spi, spi_nrfx_driver_api) = {
 
 static void event_handler(const nrfx_spis_evt_t *p_event, void *p_context)
 {
-	struct spi_nrfx_data *dev_data = p_context;
+	const struct device *dev = p_context;
+	struct spi_nrfx_data *dev_data = dev->data;
+	const struct spi_nrfx_config *dev_config = dev->config;
 
 	if (p_event->evt_type == NRFX_SPIS_XFER_DONE) {
+		int err;
+
+
+		err = dmm_buffer_out_release(dev_config->mem_reg, p_event->p_tx_buf);
+		(void)err;
+		__ASSERT_NO_MSG(err == 0);
+
+		err = dmm_buffer_in_release(dev_config->mem_reg, dev_data->ctx.rx_buf,
+				      p_event->rx_amount, p_event->p_rx_buf);
+		__ASSERT_NO_MSG(err == 0);
+
 		spi_context_complete(&dev_data->ctx, dev_data->dev,
 				     p_event->rx_amount);
 
-		pm_device_runtime_put(dev_data->dev);
+		pm_device_runtime_put_async(dev_data->dev, K_NO_WAIT);
 	}
 }
 
@@ -299,6 +432,20 @@ static void spi_nrfx_suspend(const struct device *dev)
 		nrf_spis_disable(dev_config->spis.p_reg);
 	}
 
+#if SPIS_CROSS_DOMAIN_SUPPORTED
+	if (dev_config->cross_domain && spis_has_cross_domain_connection(dev_config)) {
+#if SPIS_CROSS_DOMAIN_PINS_HANDLE
+		int err;
+
+		err = nrf_sys_event_release_global_constlat();
+		(void)err;
+		__ASSERT_NO_MSG(err >= 0);
+#else
+		__ASSERT(false, "NRF_SYS_EVENT needs to be enabled to use cross domain pins.\n");
+#endif
+	}
+#endif
+
 	(void)pinctrl_apply_state(dev_config->pcfg, PINCTRL_STATE_SLEEP);
 }
 
@@ -307,6 +454,20 @@ static void spi_nrfx_resume(const struct device *dev)
 	const struct spi_nrfx_config *dev_config = dev->config;
 
 	(void)pinctrl_apply_state(dev_config->pcfg, PINCTRL_STATE_DEFAULT);
+
+#if SPIS_CROSS_DOMAIN_SUPPORTED
+	if (dev_config->cross_domain && spis_has_cross_domain_connection(dev_config)) {
+#if SPIS_CROSS_DOMAIN_PINS_HANDLE
+		int err;
+
+		err = nrf_sys_event_request_global_constlat();
+		(void)err;
+		__ASSERT_NO_MSG(err >= 0);
+#else
+		__ASSERT(false, "NRF_SYS_EVENT needs to be enabled to use cross domain pins.\n");
+#endif
+	}
+#endif
 
 	if (dev_config->wake_gpio.port == NULL) {
 		nrf_spis_enable(dev_config->spis.p_reg);
@@ -338,16 +499,11 @@ static int spi_nrfx_init(const struct device *dev)
 	nrfx_err_t result;
 	int err;
 
-	err = pinctrl_apply_state(dev_config->pcfg, PINCTRL_STATE_DEFAULT);
-	if (err < 0) {
-		return err;
-	}
-
 	/* This sets only default values of mode and bit order. The ones to be
 	 * actually used are set in configure() when a transfer is prepared.
 	 */
 	result = nrfx_spis_init(&dev_config->spis, &dev_config->config,
-				event_handler, dev_data);
+				event_handler, (void *)dev);
 
 	if (result != NRFX_SUCCESS) {
 		LOG_ERR("Failed to initialize device: %s", dev->name);
@@ -395,28 +551,48 @@ static int spi_nrfx_init(const struct device *dev)
 	return pm_device_driver_init(dev, spi_nrfx_pm_action);
 }
 
-/*
- * Current factors requiring use of DT_NODELABEL:
+/* Macro determines PM actions interrupt safety level.
  *
- * - HAL design (requirement of drv_inst_idx in nrfx_spis_t)
- * - Name-based HAL IRQ handlers, e.g. nrfx_spis_0_irq_handler
+ * Requesting/releasing SPIS device may be ISR safe, but it cannot be reliably known whether
+ * managing its power domain is. It is then assumed that if power domains are used, device is
+ * no longer ISR safe. This macro let's us check if we will be requesting/releasing
+ * power domains and determines PM device ISR safety value.
+ *
+ * Additionally, fast SPIS devices are not ISR safe.
  */
-
-#define SPIS(idx) DT_NODELABEL(spi##idx)
-#define SPIS_PROP(idx, prop) DT_PROP(SPIS(idx), prop)
+#define SPIS_PM_ISR_SAFE(idx)									\
+	COND_CODE_1(										\
+		UTIL_AND(									\
+			IS_ENABLED(CONFIG_PM_DEVICE_POWER_DOMAIN),				\
+			UTIL_AND(								\
+				DT_NODE_HAS_PROP(SPIS(idx), power_domains),			\
+				DT_NODE_HAS_STATUS_OKAY(DT_PHANDLE(SPIS(idx), power_domains))	\
+			)									\
+		),										\
+		(0),										\
+		(COND_CODE_1(									\
+			SPIS_IS_FAST(idx),							\
+			(0),									\
+			(PM_DEVICE_ISR_SAFE)							\
+		))										\
+	)
 
 #define SPI_NRFX_SPIS_DEFINE(idx)					       \
+	NRF_DT_CHECK_NODE_HAS_REQUIRED_MEMORY_REGIONS(SPIS(idx));	       \
 	static void irq_connect##idx(void)				       \
 	{								       \
 		IRQ_CONNECT(DT_IRQN(SPIS(idx)), DT_IRQ(SPIS(idx), priority),   \
 			    nrfx_isr, nrfx_spis_##idx##_irq_handler, 0);       \
 	}								       \
 	static struct spi_nrfx_data spi_##idx##_data = {		       \
-		SPI_CONTEXT_INIT_LOCK(spi_##idx##_data, ctx),		       \
-		SPI_CONTEXT_INIT_SYNC(spi_##idx##_data, ctx),		       \
+		IF_ENABLED(CONFIG_MULTITHREADING,			       \
+			(SPI_CONTEXT_INIT_LOCK(spi_##idx##_data, ctx),))       \
+		IF_ENABLED(CONFIG_MULTITHREADING,			       \
+			(SPI_CONTEXT_INIT_SYNC(spi_##idx##_data, ctx),))       \
 		.dev  = DEVICE_DT_GET(SPIS(idx)),			       \
-		.wake_sem = Z_SEM_INITIALIZER(				       \
-			spi_##idx##_data.wake_sem, 0, 1),		       \
+		IF_ENABLED(CONFIG_MULTITHREADING,			       \
+			(.wake_sem = Z_SEM_INITIALIZER(			       \
+				spi_##idx##_data.wake_sem, 0, 1),))	       \
 	};								       \
 	PINCTRL_DT_DEFINE(SPIS(idx));					       \
 	static const struct spi_nrfx_config spi_##idx##z_config = {	       \
@@ -436,11 +612,18 @@ static int spi_nrfx_init(const struct device *dev)
 		.pcfg = PINCTRL_DT_DEV_CONFIG_GET(SPIS(idx)),		       \
 		.max_buf_len = BIT_MASK(SPIS_PROP(idx, easydma_maxcnt_bits)),  \
 		.wake_gpio = GPIO_DT_SPEC_GET_OR(SPIS(idx), wake_gpios, {0}),  \
+		.mem_reg = DMM_DEV_TO_REG(SPIS(idx)),			       \
+		IF_ENABLED(SPIS_PINS_CROSS_DOMAIN(_, /*empty*/, idx, _),       \
+			(.cross_domain = true,				       \
+			 .default_port =				       \
+				DT_PROP_OR(DT_PHANDLE(SPIS(idx),	       \
+					default_gpio_port), port, -1),))       \
 	};								       \
 	BUILD_ASSERT(!DT_NODE_HAS_PROP(SPIS(idx), wake_gpios) ||	       \
 		     !(DT_GPIO_FLAGS(SPIS(idx), wake_gpios) & GPIO_ACTIVE_LOW),\
 		     "WAKE line must be configured as active high");	       \
-	PM_DEVICE_DT_DEFINE(SPIS(idx), spi_nrfx_pm_action, 1);		       \
+	PM_DEVICE_DT_DEFINE(SPIS(idx), spi_nrfx_pm_action,		       \
+				SPIS_PM_ISR_SAFE(idx));			       \
 	SPI_DEVICE_DT_DEFINE(SPIS(idx),					       \
 			    spi_nrfx_init,				       \
 			    PM_DEVICE_DT_GET(SPIS(idx)),		       \

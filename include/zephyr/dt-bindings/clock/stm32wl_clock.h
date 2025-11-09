@@ -12,6 +12,7 @@
 #define STM32_CLOCK_BUS_AHB1    0x048
 #define STM32_CLOCK_BUS_AHB2    0x04c
 #define STM32_CLOCK_BUS_AHB3    0x050
+#define STM32_CLOCK_BUS_APB0    0x054
 #define STM32_CLOCK_BUS_APB1    0x058
 #define STM32_CLOCK_BUS_APB1_2  0x05c
 #define STM32_CLOCK_BUS_APB2    0x060
@@ -33,8 +34,10 @@
 /* #define STM32_SRC_HSI48	TBD */
 /** Bus clock */
 #define STM32_SRC_PCLK		(STM32_SRC_MSI + 1)
+#define STM32_SRC_TIMPCLK1	(STM32_SRC_PCLK + 1)
+#define STM32_SRC_TIMPCLK2	(STM32_SRC_TIMPCLK1 + 1)
 /** PLL clock outputs */
-#define STM32_SRC_PLL_P		(STM32_SRC_PCLK + 1)
+#define STM32_SRC_PLL_P		(STM32_SRC_TIMPCLK2 + 1)
 #define STM32_SRC_PLL_Q		(STM32_SRC_PLL_P + 1)
 #define STM32_SRC_PLL_R		(STM32_SRC_PLL_Q + 1)
 
@@ -43,6 +46,9 @@
 
 /** @brief RCC_BDCR register offset */
 #define BDCR_REG		0x90
+
+/** @brief RCC_CFGRx register offset */
+#define CFGR1_REG        0x08
 
 /** @brief Device domain clocks selection helpers */
 /** CCIPR devices */
@@ -60,5 +66,27 @@
 #define RNG_SEL(val)		STM32_DT_CLOCK_SELECT((val), 3, 30, CCIPR_REG)
 /** BDCR devices */
 #define RTC_SEL(val)		STM32_DT_CLOCK_SELECT((val), 3, 8, BDCR_REG)
+/** CFGR1 devices */
+#define MCO1_SEL(val)       STM32_DT_CLOCK_SELECT(val, 0xF, 24, CFGR1_REG)
+#define MCO1_PRE(val)       STM32_DT_CLOCK_SELECT(val, 0x7, 28, CFGR1_REG)
+
+/* MCO prescaler : division factor */
+#define MCO_PRE_DIV_1  0
+#define MCO_PRE_DIV_2  1
+#define MCO_PRE_DIV_4  2
+#define MCO_PRE_DIV_8  3
+#define MCO_PRE_DIV_16 4
+
+/* MCO clock output */
+#define MCO_SEL_NOCLK     0
+#define MCO_SEL_SYSCLKPRE 1
+#define MCO_SEL_MSI       2
+#define MCO_SEL_HSI16     3
+#define MCO_SEL_HSE32     4
+#define MCO_SEL_PLL1RCLK  5
+#define MCO_SEL_LSI       6
+#define MCO_SEL_LSE       8
+#define MCO_SEL_PLL1PCLK  13
+#define MCO_SEL_PLL1QCLK  14
 
 #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_STM32WL_CLOCK_H_ */

@@ -80,26 +80,23 @@ static int i2c_sifive_send_addr(const struct device *dev,
 				uint16_t rw_flag)
 {
 	const struct i2c_sifive_cfg *config = dev->config;
-	uint8_t command = 0U;
 
-	/* Wait for a previous transfer to complete */
-	while (i2c_sifive_busy(dev)) {
-	}
+	/* Wait for previous transfer */
+	while (i2c_sifive_busy(dev)) {}
 
-	/* Set transmit register to address with read/write flag */
-	sys_write8((addr | rw_flag), I2C_REG(config, REG_TRANSMIT));
+	/* Transmit address (7-bit << 1 | rw) */
+	uint8_t addr_byte = (addr << 1) | (rw_flag & 0x1);
+	sys_write8(addr_byte, I2C_REG(config, REG_TRANSMIT));
 
-	/* Addresses are always written */
-	command = SF_CMD_WRITE | SF_CMD_START;
+	/* Issue START + WRITE */
+	sys_write8(SF_CMD_WRITE | SF_CMD_START, I2C_REG(config, REG_COMMAND));
 
-	/* Write the command register to start the transfer */
-	sys_write8(command, I2C_REG(config, REG_COMMAND));
+	while (i2c_sifive_busy(dev)) {}
 
-	while (i2c_sifive_busy(dev)) {
-	}
-
-	if (IS_SET(config, REG_STATUS, SF_STATUS_RXACK)) {
-		LOG_ERR("I2C Rx failed to acknowledge\n");
+	/* Read status immediately after transfer to check for NACK */
+	uint8_t status = sys_read8(I2C_REG(config, REG_STATUS));
+	if (status & SF_STATUS_RXACK) {
+		LOG_ERR("I2C address not acknowledged (NACK)");
 		return -EIO;
 	}
 
@@ -161,8 +158,14 @@ static int i2c_sifive_read_msg(const struct device *dev,
 {
 	const struct i2c_sifive_cfg *config = dev->config;
 	uint8_t command = 0U;
+	int rc = 0;
 
-	i2c_sifive_send_addr(dev, addr, SF_TX_READ);
+	/* Send address with read flag and check for NACK */
+	rc = i2c_sifive_send_addr(dev, addr, SF_TX_READ);
+	if (rc != 0) {
+		LOG_ERR("I2C read failed to send address");
+		return rc;
+	}
 
 	while (i2c_sifive_busy(dev)) {
 	}

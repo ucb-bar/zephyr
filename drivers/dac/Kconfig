@@ -37,6 +37,8 @@ source "drivers/dac/Kconfig.sam"
 
 source "drivers/dac/Kconfig.sam0"
 
+source "drivers/dac/Kconfig.dac161s997"
+
 source "drivers/dac/Kconfig.dacx0501"
 
 source "drivers/dac/Kconfig.dacx0508"
@@ -64,5 +66,9 @@ source "drivers/dac/Kconfig.test"
 source "drivers/dac/Kconfig.max22017"
 
 source "drivers/dac/Kconfig.renesas_ra"
+
+source "drivers/dac/Kconfig.samd5x"
+
+source "drivers/dac/Kconfig.silabs"
 
 endif # DAC

@@ -106,8 +106,8 @@ static int eswifi_socket_listen(void *obj, int backlog)
 	return ret;
 }
 
-void __eswifi_socket_accept_cb(struct net_context *context, struct sockaddr *addr,
-			       size_t len, int val, void *data)
+static void __eswifi_socket_accept_cb(struct net_context *context, struct sockaddr *addr,
+				      socklen_t len, int val, void *data)
 {
 	struct sockaddr *addr_target = data;
 
@@ -191,7 +191,7 @@ static int map_credentials(int sd, const void *optval, socklen_t optlen)
 			case TLS_CREDENTIAL_CA_CERTIFICATE:
 				id = 0;
 				break;
-			case TLS_CREDENTIAL_SERVER_CERTIFICATE:
+			case TLS_CREDENTIAL_PUBLIC_CERTIFICATE:
 				id = 1;
 				break;
 			case TLS_CREDENTIAL_PRIVATE_KEY:

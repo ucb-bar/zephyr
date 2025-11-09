@@ -18,6 +18,7 @@
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/reset.h>
+#include <zephyr/linker/devicetree_regions.h>
 #include <zephyr/pm/device.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/cache.h>
@@ -76,7 +77,8 @@ struct display_stm32_ltdc_config {
 	uint32_t height;
 	struct gpio_dt_spec disp_on_gpio;
 	struct gpio_dt_spec bl_ctrl_gpio;
-	struct stm32_pclken pclken;
+	const struct stm32_pclken *pclken;
+	size_t pclk_len;
 	const struct reset_dt_spec reset;
 	const struct pinctrl_dev_config *pctrl;
 	void (*irq_config_func)(const struct device *dev);
@@ -93,7 +95,7 @@ static void stm32_ltdc_global_isr(const struct device *dev)
 			data->front_buf = data->pend_buf;
 
 			LTDC_LAYER(&data->hltdc, LTDC_LAYER_1)->CFBAR = (uint32_t)data->front_buf;
-			__HAL_LTDC_RELOAD_CONFIG(&data->hltdc);
+			__HAL_LTDC_RELOAD_IMMEDIATE_CONFIG(&data->hltdc);
 
 			k_sem_give(&data->sem);
 		}
@@ -105,8 +107,8 @@ static void stm32_ltdc_global_isr(const struct device *dev)
 static int stm32_ltdc_set_pixel_format(const struct device *dev,
 				const enum display_pixel_format format)
 {
-	int err;
 	struct display_stm32_ltdc_data *data = dev->data;
+	HAL_StatusTypeDef err;
 
 	switch (format) {
 	case PIXEL_FORMAT_RGB_565:
@@ -123,12 +125,16 @@ static int stm32_ltdc_set_pixel_format(const struct device *dev,
 		err = HAL_LTDC_SetPixelFormat(&data->hltdc, LTDC_PIXEL_FORMAT_ARGB8888, 0);
 		data->current_pixel_format = PIXEL_FORMAT_ARGB_8888;
 		data->current_pixel_size = 4u;
-	default:
-		err = -ENOTSUP;
 		break;
+	default:
+		return -ENOTSUP;
 	}
 
-	return err;
+	if (err != HAL_OK) {
+		return -EIO;
+	}
+
+	return 0;
 }
 
 static int stm32_ltdc_set_orientation(const struct device *dev,
@@ -222,7 +228,12 @@ static int stm32_ltdc_write(const struct device *dev, const uint16_t x,
 
 	data->pend_buf = pend_buf;
 
+	__HAL_LTDC_CLEAR_FLAG(&data->hltdc, LTDC_FLAG_LI);
+	__HAL_LTDC_ENABLE_IT(&data->hltdc, LTDC_IT_LI);
+
 	k_sem_take(&data->sem, K_FOREVER);
+
+	__HAL_LTDC_DISABLE_IT(&data->hltdc, LTDC_IT_LI);
 
 	return 0;
 }
@@ -263,11 +274,23 @@ static int stm32_ltdc_display_blanking_off(const struct device *dev)
 {
 	const struct display_stm32_ltdc_config *config = dev->config;
 	const struct device *display_dev = config->display_controller;
+	int err;
+
+	if (!display_dev && !config->bl_ctrl_gpio.port) {
+		return -ENOSYS;
+	}
+
+	/* Turn on backlight (if its GPIO is defined in device tree) */
+	if (config->bl_ctrl_gpio.port) {
+		err = gpio_pin_set_dt(&config->bl_ctrl_gpio, 1);
+		if (err < 0) {
+			return err;
+		}
+	}
 
 	/* Panel controller's phandle is not passed to LTDC in devicetree */
-	if (display_dev == NULL) {
-		LOG_ERR("There is no panel controller to forward blanking_off call to");
-		return -ENOSYS;
+	if (!display_dev) {
+		return 0;
 	}
 
 	if (!device_is_ready(display_dev)) {
@@ -282,11 +305,23 @@ static int stm32_ltdc_display_blanking_on(const struct device *dev)
 {
 	const struct display_stm32_ltdc_config *config = dev->config;
 	const struct device *display_dev = config->display_controller;
+	int err;
+
+	if (!display_dev && !config->bl_ctrl_gpio.port) {
+		return -ENOSYS;
+	}
+
+	/* Turn off backlight (if its GPIO is defined in device tree) */
+	if (config->bl_ctrl_gpio.port) {
+		err = gpio_pin_set_dt(&config->bl_ctrl_gpio, 0);
+		if (err < 0) {
+			return err;
+		}
+	}
 
 	/* Panel controller's phandle is not passed to LTDC in devicetree */
-	if (display_dev == NULL) {
-		LOG_ERR("There is no panel controller to forward blanking_on call to");
-		return -ENOSYS;
+	if (!display_dev) {
+		return 0;
 	}
 
 	if (!device_is_ready(display_dev)) {
@@ -297,11 +332,22 @@ static int stm32_ltdc_display_blanking_on(const struct device *dev)
 	return display_blanking_on(display_dev);
 }
 
+/* This symbol takes the value 1 if one of the device instances */
+/* is configured in dts with a domain clock */
+#if STM32_DT_INST_DEV_DOMAIN_CLOCK_SUPPORT
+#define STM32_LTDC_DOMAIN_CLOCK_SUPPORT 1
+#else
+#define STM32_LTDC_DOMAIN_CLOCK_SUPPORT 0
+#endif
+
 static int stm32_ltdc_init(const struct device *dev)
 {
 	int err;
 	const struct display_stm32_ltdc_config *config = dev->config;
 	struct display_stm32_ltdc_data *data = dev->data;
+#if defined(CONFIG_SOC_SERIES_STM32N6X)
+	RIMC_MasterConfig_t rimc = {0};
+#endif
 
 	/* Configure and set display on/off GPIO */
 	if (config->disp_on_gpio.port) {
@@ -314,7 +360,7 @@ static int stm32_ltdc_init(const struct device *dev)
 
 	/* Configure and set display backlight control GPIO */
 	if (config->bl_ctrl_gpio.port) {
-		err = gpio_pin_configure_dt(&config->bl_ctrl_gpio, GPIO_OUTPUT_ACTIVE);
+		err = gpio_pin_configure_dt(&config->bl_ctrl_gpio, GPIO_OUTPUT_INACTIVE);
 		if (err < 0) {
 			LOG_ERR("Configuration of display backlight control GPIO failed");
 			return err;
@@ -337,37 +383,22 @@ static int stm32_ltdc_init(const struct device *dev)
 
 	/* Turn on LTDC peripheral clock */
 	err = clock_control_on(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
-				(clock_control_subsys_t) &config->pclken);
+				(clock_control_subsys_t) &config->pclken[0]);
 	if (err < 0) {
 		LOG_ERR("Could not enable LTDC peripheral clock");
 		return err;
 	}
 
-#if defined(CONFIG_SOC_SERIES_STM32F4X)
-	LL_RCC_PLLSAI_Disable();
-	LL_RCC_PLLSAI_ConfigDomain_LTDC(LL_RCC_PLLSOURCE_HSE,
-					LL_RCC_PLLSAIM_DIV_8,
-					192,
-					LL_RCC_PLLSAIR_DIV_4,
-					LL_RCC_PLLSAIDIVR_DIV_8);
-
-	LL_RCC_PLLSAI_Enable();
-	while (LL_RCC_PLLSAI_IsReady() != 1) {
+	if (IS_ENABLED(STM32_LTDC_DOMAIN_CLOCK_SUPPORT) && (config->pclk_len > 1)) {
+		/* Enable LTDC clock source */
+		err = clock_control_configure(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+					      (clock_control_subsys_t) &config->pclken[1],
+					      NULL);
+		if (err < 0) {
+			LOG_ERR("Could not configure LTDC peripheral clock");
+			return err;
+		}
 	}
-#endif
-
-#if defined(CONFIG_SOC_SERIES_STM32F7X)
-	LL_RCC_PLLSAI_Disable();
-	LL_RCC_PLLSAI_ConfigDomain_LTDC(LL_RCC_PLLSOURCE_HSE,
-					LL_RCC_PLLM_DIV_25,
-					384,
-					LL_RCC_PLLSAIR_DIV_5,
-					LL_RCC_PLLSAIDIVR_DIV_8);
-
-	LL_RCC_PLLSAI_Enable();
-	while (LL_RCC_PLLSAI_IsReady() != 1) {
-	}
-#endif
 
 	/* reset LTDC peripheral */
 	(void)reset_line_toggle_dt(&config->reset);
@@ -396,8 +427,8 @@ static int stm32_ltdc_init(const struct device *dev)
 
 #if defined(CONFIG_STM32_LTDC_FB_USE_SHARED_MULTI_HEAP)
 	data->frame_buffer = shared_multi_heap_aligned_alloc(
-			CONFIG_VIDEO_BUFFER_SMH_ATTRIBUTE,
-			32,
+			CONFIG_STM32_LTDC_FB_SMH_ATTRIBUTE,
+			CONFIG_STM32_LTDC_FB_SMH_ALIGN,
 			CONFIG_STM32_LTDC_FB_NUM * data->frame_buffer_len);
 
 	if (data->frame_buffer == NULL) {
@@ -416,14 +447,20 @@ static int stm32_ltdc_init(const struct device *dev)
 		return err;
 	}
 
+#if defined(CONFIG_SOC_SERIES_STM32N6X)
+	/* Configure RIF for LTDC layer 1 */
+	rimc.MasterCID = RIF_CID_1;
+	rimc.SecPriv = RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV;
+	HAL_RIF_RIMC_ConfigMasterAttributes(RIF_MASTER_INDEX_LTDC1, &rimc);
+	HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_LTDCL1,
+					      RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+#endif
+
 	/* Disable layer 2, since it not used */
 	__HAL_LTDC_LAYER_DISABLE(&data->hltdc, LTDC_LAYER_2);
 
 	/* Set the line interrupt position */
 	LTDC->LIPCR = 0U;
-
-	__HAL_LTDC_CLEAR_FLAG(&data->hltdc, LTDC_FLAG_LI);
-	__HAL_LTDC_ENABLE_IT(&data->hltdc, LTDC_IT_LI);
 
 	return 0;
 }
@@ -455,7 +492,7 @@ static int stm32_ltdc_suspend(const struct device *dev)
 
 	/* Turn off LTDC peripheral clock */
 	err = clock_control_off(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
-				(clock_control_subsys_t) &config->pclken);
+				(clock_control_subsys_t) &config->pclken[0]);
 
 	return err;
 }
@@ -496,16 +533,8 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 };
 
 #if DT_INST_NODE_HAS_PROP(0, ext_sdram)
-
-#if DT_SAME_NODE(DT_INST_PHANDLE(0, ext_sdram), DT_NODELABEL(sdram1))
-#define FRAME_BUFFER_SECTION __stm32_sdram1_section
-#elif DT_SAME_NODE(DT_INST_PHANDLE(0, ext_sdram), DT_NODELABEL(sdram2))
-#define FRAME_BUFFER_SECTION __stm32_sdram2_section
-#else
-#error "LTDC ext-sdram property in device tree does not reference SDRAM1 or SDRAM2 node"
-#define FRAME_BUFFER_SECTION
-#endif /* DT_SAME_NODE(DT_INST_PHANDLE(0, ext_sdram), DT_NODELABEL(sdram1)) */
-
+#define FRAME_BUFFER_SECTION	\
+	Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME(DT_INST_PHANDLE(0, ext_sdram)))
 #else
 #define FRAME_BUFFER_SECTION
 #endif /* DT_INST_NODE_HAS_PROP(0, ext_sdram) */
@@ -632,6 +661,9 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 			},									\
 		},										\
 	};											\
+	static const struct stm32_pclken pclken_##inst[] =			\
+					 STM32_DT_INST_CLOCKS(inst);		\
+										\
 	static const struct display_stm32_ltdc_config stm32_ltdc_config_##inst = {		\
 		.width = DT_INST_PROP(inst, width),						\
 		.height = DT_INST_PROP(inst, height),						\
@@ -640,10 +672,8 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 		.bl_ctrl_gpio = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, bl_ctrl_gpios),		\
 				(GPIO_DT_SPEC_INST_GET(inst, bl_ctrl_gpios)), ({ 0 })),		\
 		.reset = RESET_DT_SPEC_INST_GET(0),						\
-		.pclken = {									\
-			.enr = DT_INST_CLOCKS_CELL(inst, bits),					\
-			.bus = DT_INST_CLOCKS_CELL(inst, bus)					\
-		},										\
+		.pclken = pclken_##inst,					\
+		.pclk_len = DT_INST_NUM_CLOCKS(inst),				\
 		.pctrl = STM32_LTDC_DEVICE_PINCTRL_GET(inst),					\
 		.irq_config_func = stm32_ltdc_irq_config_func_##inst,				\
 		.display_controller = DEVICE_DT_GET_OR_NULL(					\

@@ -126,6 +126,48 @@ void pm_policy_state_lock_get(enum pm_state state, uint8_t substate_id);
 void pm_policy_state_lock_put(enum pm_state state, uint8_t substate_id);
 
 /**
+ * @brief Request to lock all power states.
+ *
+ * Requests use a reference counter.
+ */
+void pm_policy_state_all_lock_get(void);
+
+/**
+ * @brief Release locking of all power states.
+ */
+void pm_policy_state_all_lock_put(void);
+
+/**
+ * @brief Apply power state constraints by locking the specified states.
+ *
+ * This function locks all power states specified in the union of all constraints
+ * in the provided constraint list. Each constraint in the set contributes to
+ * determining which power states should be locked (not allowed), by increasing
+ * a reference count just as if pm_policy_state_lock_get was called on each constraints'
+ * states individually.
+ *
+ * @param constraints Pointer to the power state constraints set to apply.
+ *
+ * @see pm_policy_state_constraints_put()
+ */
+void pm_policy_state_constraints_get(struct pm_state_constraints *constraints);
+
+/**
+ * @brief Remove power state constraints by unlocking the specified states.
+ *
+ * This function unlocks all power states that were previously locked by a
+ * corresponding call to pm_policy_state_constraints_get() with the same
+ * constraint set. The function decreases the lock counter for each affected
+ * power state specified in the union of all constraints in the list, just as
+ * if pm_policy_state_put was called on all the constraints' states individually.
+ *
+ * @param constraints Pointer to the power state constraints set to remove.
+ *
+ * @see pm_policy_state_constraints_get()
+ */
+void pm_policy_state_constraints_put(struct pm_state_constraints *constraints);
+
+/**
  * @brief Check if a power state lock is active (not allowed).
  *
  * @param state Power state.
@@ -136,6 +178,31 @@ void pm_policy_state_lock_put(enum pm_state state, uint8_t substate_id);
  * @retval false if power state lock is not active.
  */
 bool pm_policy_state_lock_is_active(enum pm_state state, uint8_t substate_id);
+
+/**
+ * @brief Check if a power state is available.
+ *
+ * It is unavailable if locked or latency requirement cannot be fulfilled in that state.
+ *
+ * @param state Power state.
+ * @param substate_id Power substate ID. Use PM_ALL_SUBSTATES to affect all the
+ *		      substates in the given power state.
+ *
+ * @retval true if power state is active.
+ * @retval false if power state is not active.
+ */
+bool pm_policy_state_is_available(enum pm_state state, uint8_t substate_id);
+
+/**
+ * @brief Check if any power state can be used.
+ *
+ * Function allows to quickly check if any power state is available and exit
+ * suspend operation early.
+ *
+ * @retval true if any power state is active.
+ * @retval false if all power states are unavailable.
+ */
+bool pm_policy_state_any_active(void);
 
 /**
  * @brief Register an event.
@@ -180,30 +247,19 @@ void pm_policy_event_update(struct pm_policy_event *evt, int64_t uptime_ticks);
 void pm_policy_event_unregister(struct pm_policy_event *evt);
 
 /**
- * @brief Increase power state locks.
+ * @brief Check if a state will disable a device
  *
- * Set power state locks in all power states that disable power in the given
- * device.
- *
- * @param dev Device reference.
- *
- * @see pm_policy_device_power_lock_put()
- * @see pm_policy_state_lock_get()
- */
-void pm_policy_device_power_lock_get(const struct device *dev);
-
-/**
- * @brief Decrease power state locks.
- *
- * Remove power state locks in all power states that disable power in the given
- * device.
+ * This function allows client code to check if a state will disable a device.
  *
  * @param dev Device reference.
+ * @param state The state to check on whether it disables the device.
+ * @param substate_id The substate to check on whether it disables the device.
  *
- * @see pm_policy_device_power_lock_get()
- * @see pm_policy_state_lock_put()
+ * @retval true if the state disables the device
+ * @retval false if the state does not disable the device
  */
-void pm_policy_device_power_lock_put(const struct device *dev);
+bool pm_policy_device_is_disabling_state(const struct device *dev,
+					 enum pm_state state, uint8_t substate_id);
 
 /**
  * @brief Returns the ticks until the next event
@@ -228,6 +284,14 @@ static inline void pm_policy_state_lock_put(enum pm_state state, uint8_t substat
 {
 	ARG_UNUSED(state);
 	ARG_UNUSED(substate_id);
+}
+
+static inline void pm_policy_state_all_lock_get(void)
+{
+}
+
+static inline void pm_policy_state_all_lock_put(void)
+{
 }
 
 static inline bool pm_policy_state_lock_is_active(enum pm_state state, uint8_t substate_id)
@@ -255,6 +319,42 @@ static inline void pm_policy_event_unregister(struct pm_policy_event *evt)
 	ARG_UNUSED(evt);
 }
 
+static inline int64_t pm_policy_next_event_ticks(void)
+{
+	return -1;
+}
+
+#endif /* CONFIG_PM */
+
+#if defined(CONFIG_PM_POLICY_DEVICE_CONSTRAINTS) || defined(__DOXYGEN__)
+/**
+ * @brief Increase power state locks.
+ *
+ * Set power state locks in all power states that disable power in the given
+ * device.
+ *
+ * @param dev Device reference.
+ *
+ * @see pm_policy_device_power_lock_put()
+ * @see pm_policy_state_lock_get()
+ */
+void pm_policy_device_power_lock_get(const struct device *dev);
+
+/**
+ * @brief Decrease power state locks.
+ *
+ * Remove power state locks in all power states that disable power in the given
+ * device.
+ *
+ * @param dev Device reference.
+ *
+ * @see pm_policy_device_power_lock_get()
+ * @see pm_policy_state_lock_put()
+ */
+void pm_policy_device_power_lock_put(const struct device *dev);
+
+#else
+
 static inline void pm_policy_device_power_lock_get(const struct device *dev)
 {
 	ARG_UNUSED(dev);
@@ -264,13 +364,7 @@ static inline void pm_policy_device_power_lock_put(const struct device *dev)
 {
 	ARG_UNUSED(dev);
 }
-
-static inline int64_t pm_policy_next_event_ticks(void)
-{
-	return -1;
-}
-
-#endif /* CONFIG_PM */
+#endif /* CONFIG_PM_POLICY_DEVICE_CONSTRAINTS */
 
 #if defined(CONFIG_PM) || defined(CONFIG_PM_POLICY_LATENCY_STANDALONE) || defined(__DOXYGEN__)
 /**

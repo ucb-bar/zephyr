@@ -24,6 +24,7 @@ static uint8_t rx[255];
 
 static struct msg_send_data {
 	int called;
+	uint8_t msg_data[CONFIG_MQTT_SN_LIB_MAX_PAYLOAD_SIZE];
 	size_t msg_sz;
 	int ret;
 	const void *dest_addr;
@@ -43,11 +44,17 @@ int mqtt_sn_data_cmp(struct mqtt_sn_data data1, struct mqtt_sn_data data2)
 static int msg_sendto(struct mqtt_sn_client *client, void *buf, size_t sz, const void *dest_addr,
 		      size_t addrlen)
 {
+	zassert_not_null(buf);
+	zassert_true(sz <= sizeof(msg_send_data.msg_data),
+		     "buffer is bigger than supported by the test: %zu", sz);
+
 	msg_send_data.called++;
 	msg_send_data.msg_sz = sz;
 	msg_send_data.client = client;
 	msg_send_data.dest_addr = dest_addr;
 	msg_send_data.addrlen = addrlen;
+
+	memcpy(msg_send_data.msg_data, buf, sz);
 
 	k_sem_give(&mqtt_sn_tx_sem);
 
@@ -69,7 +76,28 @@ static void assert_msg_send(int called, size_t msg_sz, const struct mqtt_sn_data
 	memset(&msg_send_data, 0, sizeof(msg_send_data));
 }
 
+static void assert_msg_send_data(int called, const void *msg_data, size_t msg_sz,
+				 const struct mqtt_sn_data *dest_addr)
+{
+	zassert_equal(msg_send_data.called, called, "msg_send called %d times instead of %d",
+		      msg_send_data.called, called);
+	if (msg_send_data.msg_sz != msg_sz || memcmp(msg_send_data.msg_data, msg_data, msg_sz)) {
+		LOG_ERR("Unexpected msg_data");
+		LOG_HEXDUMP_ERR(msg_send_data.msg_data, msg_send_data.msg_sz, "actual");
+		LOG_HEXDUMP_ERR(msg_data, msg_sz, "expected");
+		zassert_true(false);
+	}
+	if (dest_addr != NULL) {
+		zassert_equal(mqtt_sn_data_cmp(*dest_addr,
+					       *((struct mqtt_sn_data *)msg_send_data.dest_addr)),
+			      0, "Addresses incorrect");
+	}
+
+	memset(&msg_send_data, 0, sizeof(msg_send_data));
+}
+
 static struct {
+	uint8_t data[CONFIG_MQTT_SN_LIB_MAX_PAYLOAD_SIZE];
 	struct mqtt_sn_evt last_evt;
 	int called;
 } evt_cb_data;
@@ -77,6 +105,14 @@ static struct {
 static void evt_cb(struct mqtt_sn_client *client, const struct mqtt_sn_evt *evt)
 {
 	memcpy(&evt_cb_data.last_evt, evt, sizeof(*evt));
+
+	if (evt->type == MQTT_SN_EVT_PUBLISH) {
+		zassert_true(evt->param.publish.data.size <= sizeof(evt_cb_data.data));
+		memcpy(evt_cb_data.data, evt->param.publish.data.data,
+		       evt->param.publish.data.size);
+		evt_cb_data.last_evt.param.publish.data.data = evt_cb_data.data;
+	}
+
 	evt_cb_data.called++;
 
 	k_sem_give(&mqtt_sn_cb_sem);
@@ -92,7 +128,7 @@ static int tp_init(struct mqtt_sn_transport *tp)
 }
 
 static struct {
-	void *data;
+	const void *data;
 	ssize_t sz;
 	const void *src_addr;
 	size_t addrlen;
@@ -117,7 +153,7 @@ int tp_poll(struct mqtt_sn_client *client)
 	return recvfrom_data.sz;
 }
 
-#define NUM_TEST_CLIENTS 10
+#define NUM_TEST_CLIENTS 15
 static ZTEST_BMEM struct mqtt_sn_client mqtt_clients[NUM_TEST_CLIENTS];
 static ZTEST_BMEM struct mqtt_sn_client *mqtt_client;
 
@@ -149,7 +185,7 @@ static void cleanup(void *f)
 	mqtt_sn_client_deinit(mqtt_client);
 }
 
-static int input(struct mqtt_sn_client *client, void *buf, size_t sz,
+static int input(struct mqtt_sn_client *client, const void *buf, size_t sz,
 		 const struct mqtt_sn_data *src_addr)
 {
 	recvfrom_data.data = buf;
@@ -168,22 +204,22 @@ static void mqtt_sn_connect_no_will(struct mqtt_sn_client *client)
 
 	err = mqtt_sn_client_init(client, &client_id, &transport, evt_cb, tx, sizeof(tx), rx,
 				  sizeof(rx));
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_true(tp_initialized, "Transport not initialized");
 
 	err = mqtt_sn_add_gw(client, gw_id, gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 	zassert_false(sys_slist_is_empty(&client->gateway), "GW not saved.");
 
 	err = mqtt_sn_connect(client, false, false);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	assert_msg_send(1, 12, &gw_addr);
 	zassert_equal(client->state, 0, "Wrong state");
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 
 	err = input(client, connack, sizeof(connack), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_equal(client->state, 1, "Wrong state");
 	zassert_equal(evt_cb_data.called, 1, "NO event");
 	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_CONNECTED, "Wrong event");
@@ -197,29 +233,29 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_handle_advertise)
 
 	err = mqtt_sn_client_init(mqtt_client, &client_id, &transport, evt_cb, tx, sizeof(tx), rx,
 				  sizeof(rx));
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = input(mqtt_client, advertise, sizeof(advertise), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_false(sys_slist_is_empty(&mqtt_client->gateway), "GW not saved.");
 	zassert_equal(evt_cb_data.called, 1, "NO event");
 	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_ADVERTISE, "Wrong event");
 
 	err = input(mqtt_client, advertise, sizeof(advertise), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_false(sys_slist_is_empty(&mqtt_client->gateway), "GW not saved.");
 	zassert_equal(sys_slist_len(&mqtt_client->gateway), 1, "Too many Gateways stored.");
 	zassert_equal(evt_cb_data.called, 2, "Unexpected event");
 	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_ADVERTISE, "Wrong event");
 
 	err = mqtt_sn_connect(mqtt_client, false, false);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	assert_msg_send(1, 12, &gw_addr);
 	zassert_equal(mqtt_client->state, 0, "Wrong state");
 	zassert_equal(evt_cb_data.called, 2, "Unexpected event");
 
 	err = input(mqtt_client, connack, sizeof(connack), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_equal(mqtt_client->state, 1, "Wrong state");
 	zassert_equal(evt_cb_data.called, 3, "NO event");
 	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_CONNECTED, "Wrong event");
@@ -240,10 +276,10 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_add_gw)
 
 	err = mqtt_sn_client_init(mqtt_client, &client_id, &transport, evt_cb, tx, sizeof(tx), rx,
 				  sizeof(rx));
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = mqtt_sn_add_gw(mqtt_client, gw_id, gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_false(sys_slist_is_empty(&mqtt_client->gateway), "GW not saved.");
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 }
@@ -260,11 +296,11 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_search_gw)
 
 	err = mqtt_sn_client_init(mqtt_client, &client_id, &transport, evt_cb, tx, sizeof(tx), rx,
 				  sizeof(rx));
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
 	err = mqtt_sn_search(mqtt_client, 1);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
 	zassert_equal(err, 0, "Timed out waiting for callback.");
@@ -274,7 +310,7 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_search_gw)
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 
 	err = input(mqtt_client, gwinfo, sizeof(gwinfo), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_false(sys_slist_is_empty(&mqtt_client->gateway), "GW not saved.");
 	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_GWINFO, "Wrong event");
 }
@@ -292,11 +328,11 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_search_peer)
 
 	err = mqtt_sn_client_init(mqtt_client, &client_id, &transport, evt_cb, tx, sizeof(tx), rx,
 				  sizeof(rx));
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
 	err = mqtt_sn_search(mqtt_client, 1);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
 	zassert_equal(err, 0, "Timed out waiting for callback.");
@@ -306,7 +342,7 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_search_peer)
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 
 	err = input(mqtt_client, gwinfo, sizeof(gwinfo), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_false(sys_slist_is_empty(&mqtt_client->gateway), "GW not saved.");
 	zassert_equal(evt_cb_data.called, 1, "NO event");
 	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_GWINFO, "Wrong event");
@@ -319,16 +355,16 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_respond_searchgw)
 
 	err = mqtt_sn_client_init(mqtt_client, &client_id, &transport, evt_cb, tx, sizeof(tx), rx,
 				  sizeof(rx));
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = mqtt_sn_add_gw(mqtt_client, gw_id, gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_false(sys_slist_is_empty(&mqtt_client->gateway), "GW not saved.");
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 
 	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
 	err = input(mqtt_client, searchgw, sizeof(searchgw), &client2_id);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
 	zassert_equal(err, 0, "Timed out waiting for callback.");
@@ -353,10 +389,10 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_connect_will)
 
 	err = mqtt_sn_client_init(mqtt_client, &client_id, &transport, evt_cb, tx, sizeof(tx), rx,
 				  sizeof(rx));
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 
 	err = mqtt_sn_add_gw(mqtt_client, gw_id, gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_false(sys_slist_is_empty(&mqtt_client->gateway), "GW not saved.");
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 
@@ -364,26 +400,98 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_connect_will)
 	mqtt_client->will_msg = MQTT_SN_DATA_STRING_LITERAL("msg");
 
 	err = mqtt_sn_connect(mqtt_client, true, false);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	assert_msg_send(1, 12, &gw_addr);
 	zassert_equal(mqtt_client->state, 0, "Wrong state");
 
 	err = input(mqtt_client, willtopicreq, sizeof(willtopicreq), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_equal(mqtt_client->state, 0, "Wrong state");
 	assert_msg_send(1, 8, &gw_addr);
 
 	err = input(mqtt_client, willmsgreq, sizeof(willmsgreq), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_equal(mqtt_client->state, 0, "Wrong state");
 	zassert_equal(evt_cb_data.called, 0, "Unexpected event");
 	assert_msg_send(1, 5, &gw_addr);
 
 	err = input(mqtt_client, connack, sizeof(connack), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	zassert_equal(mqtt_client->state, 1, "Wrong state");
 	zassert_equal(evt_cb_data.called, 1, "NO event");
 	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_CONNECTED, "Wrong event");
+}
+
+/* Test a simple incoming PUBLISH event */
+static ZTEST(mqtt_sn_client, test_mqtt_sn_publish_event_qos0)
+{
+	struct mqtt_sn_data data = MQTT_SN_DATA_STRING_LITERAL("Hello.");
+	struct mqtt_sn_data topic = MQTT_SN_DATA_STRING_LITERAL("zephyr");
+	uint8_t suback[] = {8, 0x13, 0, 0x1B, 0x1B, 0x00, 0x01, 0};
+	static const uint8_t pubmsg[] = {0x0d, 0x0c, 0x01, 0x00, 0x2a, 0x00, 0x00,
+					 'H',  'e',  'l',  'l',  'o',  '.'};
+	int err;
+
+	mqtt_sn_connect_no_will(mqtt_client);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
+
+	err = mqtt_sn_subscribe(mqtt_client, MQTT_SN_QOS_0, &topic);
+	zassert_ok(err, "Unexpected error %d", err);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(1));
+	/* Expect a SUBSCRIBE message */
+	assert_msg_send(1, 11, &gw_addr);
+
+	err = input(mqtt_client, suback, sizeof(suback), &gw_addr);
+	zassert_ok(err, "unexpected error %d", err);
+
+	/* Send PUBLISH */
+	err = input(mqtt_client, pubmsg, sizeof(pubmsg), &gw_addr);
+	zassert_equal(err, 0, "unexpected error %d", err);
+	zassert_equal(evt_cb_data.called, 2, "NO event");
+	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_PUBLISH, "Wrong event");
+	zassert_equal(evt_cb_data.last_evt.param.publish.data.size, data.size,
+		      "Unexpected publish data size: %zu",
+		      evt_cb_data.last_evt.param.publish.data.size);
+	zassert_mem_equal(evt_cb_data.last_evt.param.publish.data.data, data.data, data.size);
+}
+
+/* Test a simple incoming PUBLISH event on a predefined topic */
+static ZTEST(mqtt_sn_client, test_mqtt_sn_publish_event_qos0_predefined)
+{
+	struct mqtt_sn_data data = MQTT_SN_DATA_STRING_LITERAL("Hello.");
+	struct mqtt_sn_data topic = MQTT_SN_DATA_STRING_LITERAL("zephyr");
+	uint8_t suback[] = {8, 0x13, 0, 0x1B, 0x1B, 0x00, 0x01, 0};
+	static const uint8_t pubmsg[] = {0x0d, 0x0c, 0x01, 0x00, 0x2a, 0x00, 0x00,
+					 'H',  'e',  'l',  'l',  'o',  '.'};
+	int err;
+
+	mqtt_sn_connect_no_will(mqtt_client);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
+
+	err = mqtt_sn_predefine_topic(mqtt_client, 42, &topic);
+	zassert_equal(err, 0, "unexpected error %d", err);
+
+	err = mqtt_sn_predefine_topic(mqtt_client, 42, &topic);
+	zassert_equal(err, -EALREADY, "unexpected error %d", err);
+
+	err = mqtt_sn_subscribe(mqtt_client, MQTT_SN_QOS_0, &topic);
+	zassert_ok(err, "Unexpected error %d", err);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(1));
+	/* Expect a SUBSCRIBE message */
+	assert_msg_send(1, 7, &gw_addr);
+
+	err = input(mqtt_client, suback, sizeof(suback), &gw_addr);
+	zassert_ok(err, "unexpected error %d", err);
+
+	/* Send PUBLISH */
+	err = input(mqtt_client, pubmsg, sizeof(pubmsg), &gw_addr);
+	zassert_equal(err, 0, "unexpected error %d", err);
+	zassert_equal(evt_cb_data.called, 2, "NO event");
+	zassert_equal(evt_cb_data.last_evt.type, MQTT_SN_EVT_PUBLISH, "Wrong event");
+	zassert_equal(evt_cb_data.last_evt.param.publish.data.size, data.size,
+		      "Unexpected publish data size: %zu",
+		      evt_cb_data.last_evt.param.publish.data.size);
+	zassert_mem_equal(evt_cb_data.last_evt.param.publish.data.data, data.data, data.size);
 }
 
 /* Test a simple PUBLISH message */
@@ -409,7 +517,7 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_publish_qos0)
 
 	/* Send REGACK in response */
 	err = input(mqtt_client, regack, sizeof(regack), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
 	assert_msg_send(0, 0, NULL);
 
@@ -417,6 +525,44 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_publish_qos0)
 	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
 	zassert_equal(err, 0, "Timed out waiting for callback.");
 	assert_msg_send(1, 20, &gw_addr);
+
+	/* Expect publishes to be empty - all done */
+	zassert_true(sys_slist_is_empty(&mqtt_client->publish), "Publish not empty");
+
+	/* Expect topics not to be empty - should be remembered */
+	zassert_false(sys_slist_is_empty(&mqtt_client->topic), "Topic empty");
+}
+
+/* Test a simple PUBLISH message on a predefined topic */
+static ZTEST(mqtt_sn_client, test_mqtt_sn_publish_qos0_predefined)
+{
+	struct mqtt_sn_data data = MQTT_SN_DATA_STRING_LITERAL("Hello");
+	struct mqtt_sn_data topic = MQTT_SN_DATA_STRING_LITERAL("zephyr");
+	static const uint8_t msg_data_pub[] = {0x0c, 0x0c, 0x01, 0x00, 0x2a, 0x00,
+					       0x00, 'H',  'e',  'l',  'l',  'o'};
+	int err;
+
+	mqtt_sn_connect_no_will(mqtt_client);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
+
+	err = mqtt_sn_predefine_topic(mqtt_client, 42, &topic);
+	zassert_equal(err, 0, "unexpected error %d", err);
+
+	err = mqtt_sn_predefine_topic(mqtt_client, 42, &topic);
+	zassert_equal(err, -EALREADY, "unexpected error %d", err);
+
+	/* Expect topics not to be empty, because we just predefined one */
+	zassert_false(sys_slist_is_empty(&mqtt_client->topic), "Topic empty");
+
+	err = mqtt_sn_publish(mqtt_client, MQTT_SN_QOS_0, &topic, false, &data);
+	zassert_equal(err, 0, "Unexpected error %d", err);
+
+	assert_msg_send(0, 0, NULL);
+
+	/* Expect PUBLISH to be sent */
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
+	zassert_equal(err, 0, "Timed out waiting for callback.");
+	assert_msg_send_data(1, msg_data_pub, sizeof(msg_data_pub), &gw_addr);
 
 	/* Expect publishes to be empty - all done */
 	zassert_true(sys_slist_is_empty(&mqtt_client->publish), "Publish not empty");
@@ -439,9 +585,9 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_wait_regack)
 	struct mqtt_sn_data topic1 = MQTT_SN_DATA_STRING_LITERAL("zephyr1");
 	struct mqtt_sn_data topic2 = MQTT_SN_DATA_STRING_LITERAL("zephyr2");
 	/* registration ack with topic ID 0x1A1B, msg ID 0x0002, return code accepted */
-	uint8_t regack1[] = {7, 0x0B, 0x1A, 0x1B, 0x00, 0x03, 0};
+	uint8_t regack1[] = {7, 0x0B, 0x1A, 0x1B, 0x00, 0x01, 0};
 	/* registration ack with topic ID 0x1A1C, msg ID 0x0003, return code accepted */
-	uint8_t regack2[] = {7, 0x0B, 0x1A, 0x1C, 0x00, 0x05, 0};
+	uint8_t regack2[] = {7, 0x0B, 0x1A, 0x1C, 0x00, 0x03, 0};
 	int err;
 
 	mqtt_sn_connect_no_will(mqtt_client);
@@ -461,7 +607,7 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_wait_regack)
 
 	/* Send REGACK in response */
 	err = input(mqtt_client, regack1, sizeof(regack1), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
 	assert_msg_send(0, 0, NULL);
 
@@ -475,7 +621,7 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_wait_regack)
 
 	/* Send next REGACK in response */
 	err = input(mqtt_client, regack2, sizeof(regack2), &gw_addr);
-	zassert_equal(err, 0, "unexpected error %d");
+	zassert_equal(err, 0, "unexpected error %d", err);
 	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
 	assert_msg_send(0, 0, NULL);
 
@@ -503,8 +649,8 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_wait_suback)
 {
 	struct mqtt_sn_data topic1 = MQTT_SN_DATA_STRING_LITERAL("zephyr1");
 	struct mqtt_sn_data topic2 = MQTT_SN_DATA_STRING_LITERAL("zephyr2");
-	uint8_t suback1[] = {8, 0x13, 0, 0x1B, 0x1B, 0x00, 0x07, 0};
-	uint8_t suback2[] = {8, 0x13, 0, 0x1B, 0x1C, 0x00, 0x08, 0};
+	uint8_t suback1[] = {8, 0x13, 0, 0x1B, 0x1B, 0x00, 0x01, 0};
+	uint8_t suback2[] = {8, 0x13, 0, 0x1B, 0x1C, 0x00, 0x02, 0};
 	int err;
 
 	mqtt_sn_connect_no_will(mqtt_client);
@@ -523,7 +669,7 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_wait_suback)
 	assert_msg_send(0, 0, NULL);
 
 	err = input(mqtt_client, suback1, sizeof(suback1), &gw_addr);
-	zassert_ok(err, "unexpected error %d");
+	zassert_ok(err, "unexpected error %d", err);
 	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(1));
 	/* Expect second SUBSCRIBE message */
 	assert_msg_send(1, 12, &gw_addr);
@@ -539,10 +685,94 @@ static ZTEST(mqtt_sn_client, test_mqtt_sn_wait_suback)
 	zassert_not_ok(err, "Error expected");
 
 	err = input(mqtt_client, suback2, sizeof(suback2), &gw_addr);
-	zassert_ok(err, "unexpected error %d");
+	zassert_ok(err, "unexpected error %d", err);
 	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(1));
 	/* Expect UNSUBSCRIBE message */
 	assert_msg_send(1, 12, &gw_addr);
+}
+
+/*
+ * Test updating the will topic after the initial connect.
+ */
+static ZTEST(mqtt_sn_client, test_mqtt_sn_will_topic_update)
+{
+	int err;
+	static struct mqtt_sn_data topic = MQTT_SN_DATA_STRING_LITERAL("will");
+	static const uint8_t msg_data_request[] = {0x07, 0x1a, 0x00, 'w', 'i', 'l', 'l'};
+	static const uint8_t msg_data_request_empty[] = {0x02, 0x1a};
+	static const uint8_t msg_data_response[] = {0x03, 0x1b, 0x00};
+
+	mqtt_sn_connect_no_will(mqtt_client);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
+
+	mqtt_client->will_topic = topic;
+	mqtt_client->will_retain = false;
+	mqtt_client->will_qos = 0;
+
+	err = mqtt_sn_update_will_topic(mqtt_client);
+	zassert_ok(err, "unexpected error %d", err);
+
+	/* Parallel updates are not supported. */
+	err = mqtt_sn_update_will_topic(mqtt_client);
+	zassert_equal(err, -EALREADY, "unexpected error %d", err);
+
+	/* Expect WILLTOPICUPD to be sent */
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
+	zassert_equal(err, 0, "Timed out waiting for callback.");
+	assert_msg_send_data(1, msg_data_request, sizeof(msg_data_request), &gw_addr);
+
+	/* Send WILLTOPICRESP in response */
+	err = input(mqtt_client, msg_data_response, sizeof(msg_data_response), &gw_addr);
+	zassert_ok(err, "unexpected error %d", err);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(1));
+
+	/* Request deletion of the will topic */
+	mqtt_client->will_topic.size = 0;
+	err = mqtt_sn_update_will_topic(mqtt_client);
+	zassert_ok(err, "unexpected error %d", err);
+
+	/* Expect WILLTOPICUPD to be sent */
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
+	zassert_equal(err, 0, "Timed out waiting for callback.");
+	assert_msg_send_data(1, msg_data_request_empty, sizeof(msg_data_request_empty), &gw_addr);
+
+	/* Send WILLTOPICRESP in response */
+	err = input(mqtt_client, msg_data_response, sizeof(msg_data_response), &gw_addr);
+	zassert_ok(err, "unexpected error %d", err);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(1));
+}
+
+/*
+ * Test updating the will message after the initial connect.
+ */
+static ZTEST(mqtt_sn_client, test_mqtt_sn_will_message_update)
+{
+	int err;
+	static struct mqtt_sn_data will_msg = MQTT_SN_DATA_STRING_LITERAL("RIP");
+	static const uint8_t msg_data_request[] = {0x05, 0x1c, 'R', 'I', 'P'};
+	static const uint8_t msg_data_response[] = {0x03, 0x1d, 0x00};
+
+	mqtt_sn_connect_no_will(mqtt_client);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_NO_WAIT);
+
+	mqtt_client->will_msg = will_msg;
+
+	err = mqtt_sn_update_will_message(mqtt_client);
+	zassert_ok(err, "unexpected error %d", err);
+
+	/* Parallel updates are not supported. */
+	err = mqtt_sn_update_will_message(mqtt_client);
+	zassert_equal(err, -EALREADY, "unexpected error %d", err);
+
+	/* Expect WILLMSGUPD to be sent */
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(10));
+	zassert_equal(err, 0, "Timed out waiting for callback.");
+	assert_msg_send_data(1, msg_data_request, sizeof(msg_data_request), &gw_addr);
+
+	/* Send WILLMSGRESP in response */
+	err = input(mqtt_client, msg_data_response, sizeof(msg_data_response), &gw_addr);
+	zassert_ok(err, "unexpected error %d", err);
+	err = k_sem_take(&mqtt_sn_tx_sem, K_SECONDS(1));
 }
 
 ZTEST_SUITE(mqtt_sn_client, NULL, NULL, setup, cleanup, NULL);

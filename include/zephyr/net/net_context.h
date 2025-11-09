@@ -7,6 +7,8 @@
 /*
  * Copyright (c) 2016 Intel Corporation
  * Copyright (c) 2021 Nordic Semiconductor
+ * Copyright (c) 2025 Aerlync Labs Inc.
+ * Copyright 2025 NXP
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -369,6 +371,10 @@ __net_socket struct net_context {
 		/** Receive network packet information in recvmsg() call */
 		bool recv_pktinfo;
 #endif
+#if defined(CONFIG_NET_CONTEXT_RECV_HOPLIMIT)
+		/** Receive IPv6 hop limit or IPv4 TTL as ancillary data in recvmsg() call */
+		bool recv_hoplimit;
+#endif
 #if defined(CONFIG_NET_IPV6)
 		/**
 		 * Source address selection preferences. Currently used only for IPv6,
@@ -389,6 +395,11 @@ __net_socket struct net_context {
 			 * Only allowed for SOCK_DGRAM type sockets.
 			 */
 			uint8_t ipv4_mcast_ifindex;
+		};
+		/** Flag to enable/disable multicast loop */
+		union {
+			bool ipv6_mcast_loop;  /**< IPv6 multicast loop */
+			bool ipv4_mcast_loop;  /**< IPv4 multicast loop */
 		};
 #endif /* CONFIG_NET_IPV6 || CONFIG_NET_IPV4 */
 
@@ -838,6 +849,38 @@ static inline void net_context_set_ipv4_mcast_ttl(struct net_context *context,
 	context->ipv4_mcast_ttl = ttl;
 }
 
+#if defined(CONFIG_NET_IPV4)
+/**
+ * @brief Get IPv4 multicast loop value for this context.
+ *
+ * @details This function returns the IPv4 multicast loop value
+ *	    that is set to this context.
+ *
+ * @param context Network context.
+ *
+ * @return IPv4 multicast loop value
+ */
+static inline bool net_context_get_ipv4_mcast_loop(struct net_context *context)
+{
+	return context->options.ipv4_mcast_loop;
+}
+
+/**
+ * @brief Set IPv4 multicast loop value for this context.
+ *
+ * @details This function sets the IPv4 multicast loop value for
+ *	    this context.
+ *
+ * @param context Network context.
+ * @param ipv4_mcast_loop IPv4 multicast loop value.
+ */
+static inline void net_context_set_ipv4_mcast_loop(struct net_context *context,
+						   bool ipv4_mcast_loop)
+{
+	context->options.ipv4_mcast_loop = ipv4_mcast_loop;
+}
+#endif
+
 /**
  * @brief Get IPv6 hop limit value for this context.
  *
@@ -896,6 +939,40 @@ static inline void net_context_set_ipv6_mcast_hop_limit(struct net_context *cont
 {
 	context->ipv6_mcast_hop_limit = hop_limit;
 }
+
+#if defined(CONFIG_NET_IPV6)
+
+/**
+ * @brief Get IPv6 multicast loop value for this context.
+ *
+ * @details This function returns the IPv6 multicast loop value
+ *          that is set to this context.
+ *
+ * @param context Network context.
+ *
+ * @return IPv6 multicast loop value
+ */
+static inline bool net_context_get_ipv6_mcast_loop(struct net_context *context)
+{
+	return context->options.ipv6_mcast_loop;
+}
+
+/**
+ * @brief Set IPv6 multicast loop value for this context.
+ *
+ * @details This function sets the IPv6 multicast loop value for
+ *          this context.
+ *
+ * @param context Network context.
+ * @param ipv6_mcast_loop IPv6 multicast loop value.
+ */
+static inline void net_context_set_ipv6_mcast_loop(struct net_context *context,
+						   bool ipv6_mcast_loop)
+{
+	context->options.ipv6_mcast_loop = ipv6_mcast_loop;
+}
+
+#endif
 
 /**
  * @brief Enable or disable socks proxy support for this context.
@@ -1325,6 +1402,9 @@ enum net_context_option {
 	NET_OPT_MCAST_IFINDEX     = 19, /**< IPv6 multicast output network interface index */
 	NET_OPT_MTU               = 20, /**< IPv4 socket path MTU */
 	NET_OPT_LOCAL_PORT_RANGE  = 21, /**< Clamp local port range */
+	NET_OPT_IPV6_MCAST_LOOP	  = 22, /**< IPV6 multicast loop */
+	NET_OPT_IPV4_MCAST_LOOP	  = 23, /**< IPV4 multicast loop */
+	NET_OPT_RECV_HOPLIMIT     = 24, /**< Receive hop limit information */
 };
 
 /**
@@ -1339,7 +1419,7 @@ enum net_context_option {
  */
 int net_context_set_option(struct net_context *context,
 			   enum net_context_option option,
-			   const void *value, size_t len);
+			   const void *value, uint32_t len);
 
 /**
  * @brief Get connection option value for this context.
@@ -1353,7 +1433,7 @@ int net_context_set_option(struct net_context *context,
  */
 int net_context_get_option(struct net_context *context,
 			   enum net_context_option option,
-			   void *value, size_t *len);
+			   void *value, uint32_t *len);
 
 /**
  * @typedef net_context_cb_t

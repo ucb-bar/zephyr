@@ -82,7 +82,7 @@ static int max14906_reg_trans_spi_diag(const struct device *dev, uint8_t addr, u
 		LOG_ERR("[FAULT] pin triggered");
 	}
 
-	uint8_t ret = max149x6_reg_transceive(dev, addr, tx, rx_diag_buff, rw);
+	int ret = max149x6_reg_transceive(dev, addr, tx, rx_diag_buff, rw);
 
 	if (max14906_pars_spi_diag(dev, rx_diag_buff, rw)) {
 		ret = -EIO;
@@ -441,7 +441,7 @@ static DEVICE_API(gpio, gpio_max14906_api) = {
 
 #define GPIO_MAX14906_DEVICE(id)                                                                   \
 	static const struct max14906_config max14906_##id##_cfg = {                                \
-		.spi = SPI_DT_SPEC_INST_GET(id, SPI_OP_MODE_MASTER | SPI_WORD_SET(8U), 0U),        \
+		.spi = SPI_DT_SPEC_INST_GET(id, SPI_OP_MODE_MASTER | SPI_WORD_SET(8U)),            \
 		.ready_gpio = GPIO_DT_SPEC_INST_GET(id, drdy_gpios),                               \
 		.fault_gpio = GPIO_DT_SPEC_INST_GET(id, fault_gpios),                              \
 		.sync_gpio = GPIO_DT_SPEC_INST_GET(id, sync_gpios),                                \

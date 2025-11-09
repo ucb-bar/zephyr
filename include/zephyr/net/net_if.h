@@ -125,6 +125,7 @@ struct net_if_addr {
 			uint8_t acd_state;
 		};
 #endif /* CONFIG_NET_IPV4_ACD */
+		uint8_t _dummy;
 	};
 
 #if defined(CONFIG_NET_IPV6_DAD) || defined(CONFIG_NET_IPV4_ACD)
@@ -502,7 +503,7 @@ struct net_if_dhcpv4 {
 	/** Timer start */
 	int64_t timer_start;
 
-	/** Time for INIT, DISCOVER, REQUESTING, RENEWAL */
+	/** Time for INIT, INIT-REBOOT, DISCOVER, REQUESTING, RENEWAL */
 	uint32_t request_time;
 
 	uint32_t xid;
@@ -702,6 +703,17 @@ struct net_if_dev {
 
 	/** RFC 2863 operational status */
 	enum net_if_oper_state oper_state;
+
+	/** Last time the operational state was changed.
+	 * This is used to determine how long the interface has been in the
+	 * current operational state.
+	 *
+	 * This value is set to 0 when the interface is created, and then
+	 * updated whenever the operational state changes.
+	 *
+	 * The value is in milliseconds since boot.
+	 */
+	int64_t oper_state_change_time;
 };
 
 /**
@@ -900,10 +912,15 @@ static inline enum net_if_oper_state net_if_oper_state_set(
 		return NET_IF_OPER_UNKNOWN;
 	}
 
-	BUILD_ASSERT((enum net_if_oper_state)(-1) > 0 && NET_IF_OPER_UNKNOWN == 0);
 	if (oper_state <= NET_IF_OPER_UP) {
 		iface->if_dev->oper_state = oper_state;
 	}
+
+	net_if_lock(iface);
+
+	iface->if_dev->oper_state_change_time = k_uptime_get();
+
+	net_if_unlock(iface);
 
 	return iface->if_dev->oper_state;
 }
@@ -922,6 +939,34 @@ static inline enum net_if_oper_state net_if_oper_state(struct net_if *iface)
 	}
 
 	return iface->if_dev->oper_state;
+}
+
+/**
+ * @brief Get an operational state change time of an interface
+ *
+ * @param iface Pointer to network interface
+ * @param change_time Pointer to store the change time. Time the operational
+ *        state of an interface was last changed, in milliseconds since boot.
+ *        If the interface operational state has not been changed yet,
+ *        then the value is 0.
+ *
+ * @return 0 if ok, -EINVAL if operational state change time could not be
+ *         retrieved (for example if iface or change_time is NULL).
+ */
+static inline int net_if_oper_state_change_time(struct net_if *iface,
+						int64_t *change_time)
+{
+	if (iface == NULL || iface->if_dev == NULL || change_time == NULL) {
+		return -EINVAL;
+	}
+
+	net_if_lock(iface);
+
+	*change_time = iface->if_dev->oper_state_change_time;
+
+	net_if_unlock(iface);
+
+	return 0;
 }
 
 /**
@@ -1246,13 +1291,20 @@ static inline int net_if_set_link_addr_unlocked(struct net_if *iface,
 						uint8_t *addr, uint8_t len,
 						enum net_link_type type)
 {
+	int ret;
+
 	if (net_if_flag_is_set(iface, NET_IF_RUNNING)) {
 		return -EPERM;
 	}
 
-	net_if_get_link_addr(iface)->addr = addr;
-	net_if_get_link_addr(iface)->len = len;
-	net_if_get_link_addr(iface)->type = type;
+	if (len > sizeof(net_if_get_link_addr(iface)->addr)) {
+		return -EINVAL;
+	}
+
+	ret = net_linkaddr_create(net_if_get_link_addr(iface), addr, len, type);
+	if (ret < 0) {
+		return ret;
+	}
 
 	net_hostname_set_postfix(addr, len);
 
@@ -1469,6 +1521,12 @@ int net_if_config_ipv6_get(struct net_if *iface,
  */
 int net_if_config_ipv6_put(struct net_if *iface);
 
+
+/** @cond INTERNAL_HIDDEN */
+struct net_if_addr *net_if_ipv6_addr_lookup_raw(const uint8_t *addr,
+						struct net_if **ret);
+/** @endcond */
+
 /**
  * @brief Check if this IPv6 address belongs to one of the interfaces.
  *
@@ -1480,6 +1538,11 @@ int net_if_config_ipv6_put(struct net_if *iface);
 struct net_if_addr *net_if_ipv6_addr_lookup(const struct in6_addr *addr,
 					    struct net_if **iface);
 
+/** @cond INTERNAL_HIDDEN */
+struct net_if_addr *net_if_ipv6_addr_lookup_by_iface_raw(struct net_if *iface,
+							 const uint8_t *addr);
+/** @endcond */
+
 /**
  * @brief Check if this IPv6 address belongs to this specific interfaces.
  *
@@ -1489,7 +1552,7 @@ struct net_if_addr *net_if_ipv6_addr_lookup(const struct in6_addr *addr,
  * @return Pointer to interface address, NULL if not found.
  */
 struct net_if_addr *net_if_ipv6_addr_lookup_by_iface(struct net_if *iface,
-						     struct in6_addr *addr);
+						     const struct in6_addr *addr);
 
 /**
  * @brief Check if this IPv6 address belongs to one of the interface indices.
@@ -1512,7 +1575,7 @@ __syscall int net_if_ipv6_addr_lookup_by_index(const struct in6_addr *addr);
  * @return Pointer to interface address, NULL if cannot be added
  */
 struct net_if_addr *net_if_ipv6_addr_add(struct net_if *iface,
-					 struct in6_addr *addr,
+					 const struct in6_addr *addr,
 					 enum net_addr_type addr_type,
 					 uint32_t vlifetime);
 
@@ -1527,7 +1590,7 @@ struct net_if_addr *net_if_ipv6_addr_add(struct net_if *iface,
  * @return True if ok, false if address could not be added
  */
 __syscall bool net_if_ipv6_addr_add_by_index(int index,
-					     struct in6_addr *addr,
+					     const struct in6_addr *addr,
 					     enum net_addr_type addr_type,
 					     uint32_t vlifetime);
 
@@ -1627,6 +1690,12 @@ typedef void (*net_if_ip_maddr_cb_t)(struct net_if *iface,
  */
 void net_if_ipv6_maddr_foreach(struct net_if *iface, net_if_ip_maddr_cb_t cb,
 			       void *user_data);
+
+
+/** @cond INTERNAL_HIDDEN */
+struct net_if_mcast_addr *net_if_ipv6_maddr_lookup_raw(const uint8_t *maddr,
+						       struct net_if **ret);
+/** @endcond */
 
 /**
  * @brief Check if this IPv6 multicast address belongs to a specific interface
@@ -1758,7 +1827,7 @@ struct net_if_ipv6_prefix *net_if_ipv6_prefix_get(struct net_if *iface,
  * @return Pointer to prefix, NULL if not found.
  */
 struct net_if_ipv6_prefix *net_if_ipv6_prefix_lookup(struct net_if *iface,
-						     struct in6_addr *addr,
+						     const struct in6_addr *addr,
 						     uint8_t len);
 
 /**
@@ -1772,7 +1841,7 @@ struct net_if_ipv6_prefix *net_if_ipv6_prefix_lookup(struct net_if *iface,
  * @return Pointer to prefix, NULL if the prefix was not added.
  */
 struct net_if_ipv6_prefix *net_if_ipv6_prefix_add(struct net_if *iface,
-						  struct in6_addr *prefix,
+						  const struct in6_addr *prefix,
 						  uint8_t len,
 						  uint32_t lifetime);
 
@@ -1785,7 +1854,7 @@ struct net_if_ipv6_prefix *net_if_ipv6_prefix_add(struct net_if *iface,
  *
  * @return True if successfully removed, false otherwise
  */
-bool net_if_ipv6_prefix_rm(struct net_if *iface, struct in6_addr *addr,
+bool net_if_ipv6_prefix_rm(struct net_if *iface, const struct in6_addr *addr,
 			   uint8_t len);
 
 /**
@@ -1826,7 +1895,7 @@ void net_if_ipv6_prefix_unset_timer(struct net_if_ipv6_prefix *prefix);
  *
  * @return True if address is part of our subnet, false otherwise
  */
-bool net_if_ipv6_addr_onlink(struct net_if **iface, struct in6_addr *addr);
+bool net_if_ipv6_addr_onlink(struct net_if **iface, const struct in6_addr *addr);
 
 /**
  * @brief Get the IPv6 address of the given router
@@ -1864,7 +1933,7 @@ static inline struct in6_addr *net_if_router_ipv6(struct net_if_router *router)
  * @return Pointer to router information, NULL if cannot be found
  */
 struct net_if_router *net_if_ipv6_router_lookup(struct net_if *iface,
-						struct in6_addr *addr);
+						const struct in6_addr *addr);
 
 /**
  * @brief Find default router for this IPv6 address.
@@ -1876,7 +1945,7 @@ struct net_if_router *net_if_ipv6_router_lookup(struct net_if *iface,
  * @return Pointer to router information, NULL if cannot be found
  */
 struct net_if_router *net_if_ipv6_router_find_default(struct net_if *iface,
-						      struct in6_addr *addr);
+						      const struct in6_addr *addr);
 
 /**
  * @brief Update validity lifetime time of a router.
@@ -1897,7 +1966,7 @@ void net_if_ipv6_router_update_lifetime(struct net_if_router *router,
  * @return Pointer to router information, NULL if could not be added
  */
 struct net_if_router *net_if_ipv6_router_add(struct net_if *iface,
-					     struct in6_addr *addr,
+					     const struct in6_addr *addr,
 					     uint16_t router_lifetime);
 
 /**
@@ -2201,6 +2270,32 @@ static inline struct net_if *net_if_ipv6_select_src_iface(
 #endif
 
 /**
+ * @brief Get a network interface that should be used when sending
+ * IPv6 network data to destination. Also return the source IPv6 address from
+ * that network interface.
+ *
+ * @param dst IPv6 destination address
+ * @param src_addr IPv6 source address. This can be set to NULL if the source
+ *                 address is not needed.
+ *
+ * @return Pointer to network interface to use, NULL if no suitable interface
+ * could be found.
+ */
+#if defined(CONFIG_NET_IPV6)
+struct net_if *net_if_ipv6_select_src_iface_addr(const struct in6_addr *dst,
+						 const struct in6_addr **src_addr);
+#else
+static inline struct net_if *net_if_ipv6_select_src_iface_addr(
+	const struct in6_addr *dst, const struct in6_addr **src_addr)
+{
+	ARG_UNUSED(dst);
+	ARG_UNUSED(src_addr);
+
+	return NULL;
+}
+#endif /* CONFIG_NET_IPV6 */
+
+/**
  * @brief Get a IPv6 link local address in a given state.
  *
  * @param iface Interface to use. Must be a valid pointer to an interface.
@@ -2325,7 +2420,7 @@ struct net_if_addr *net_if_ipv4_addr_lookup(const struct in_addr *addr,
  * @return Pointer to interface address, NULL if cannot be added
  */
 struct net_if_addr *net_if_ipv4_addr_add(struct net_if *iface,
-					 struct in_addr *addr,
+					 const struct in_addr *addr,
 					 enum net_addr_type addr_type,
 					 uint32_t vlifetime);
 
@@ -2360,7 +2455,7 @@ __syscall int net_if_ipv4_addr_lookup_by_index(const struct in_addr *addr);
  * @return True if ok, false if the address could not be added
  */
 __syscall bool net_if_ipv4_addr_add_by_index(int index,
-					     struct in_addr *addr,
+					     const struct in_addr *addr,
 					     enum net_addr_type addr_type,
 					     uint32_t vlifetime);
 
@@ -2501,7 +2596,7 @@ static inline struct in_addr *net_if_router_ipv4(struct net_if_router *router)
  * @return Pointer to router information, NULL if cannot be found
  */
 struct net_if_router *net_if_ipv4_router_lookup(struct net_if *iface,
-						struct in_addr *addr);
+						const struct in_addr *addr);
 
 /**
  * @brief Find default router for this IPv4 address.
@@ -2513,7 +2608,7 @@ struct net_if_router *net_if_ipv4_router_lookup(struct net_if *iface,
  * @return Pointer to router information, NULL if cannot be found
  */
 struct net_if_router *net_if_ipv4_router_find_default(struct net_if *iface,
-						      struct in_addr *addr);
+						      const struct in_addr *addr);
 /**
  * @brief Add IPv4 router to the system.
  *
@@ -2525,7 +2620,7 @@ struct net_if_router *net_if_ipv4_router_find_default(struct net_if *iface,
  * @return Pointer to router information, NULL if could not be added
  */
 struct net_if_router *net_if_ipv4_router_add(struct net_if *iface,
-					     struct in_addr *addr,
+					     const struct in_addr *addr,
 					     bool is_default,
 					     uint16_t router_lifetime);
 
@@ -2580,6 +2675,32 @@ static inline struct net_if *net_if_ipv4_select_src_iface(
 	return NULL;
 }
 #endif
+
+/**
+ * @brief Get a network interface that should be used when sending
+ * IPv4 network data to destination. Also return the source IPv4 address from
+ * that network interface.
+ *
+ * @param dst IPv4 destination address
+ * @param src_addr IPv4 source address. This can be set to NULL if the source
+ *                 address is not needed.
+ *
+ * @return Pointer to network interface to use, NULL if no suitable interface
+ * could be found.
+ */
+#if defined(CONFIG_NET_IPV4)
+struct net_if *net_if_ipv4_select_src_iface_addr(const struct in_addr *dst,
+						 const struct in_addr **src_addr);
+#else
+static inline struct net_if *net_if_ipv4_select_src_iface_addr(
+	const struct in_addr *dst, const struct in_addr **src_addr)
+{
+	ARG_UNUSED(dst);
+	ARG_UNUSED(src_addr);
+
+	return NULL;
+}
+#endif /* CONFIG_NET_IPV4 */
 
 /**
  * @brief Get a IPv4 source address that should be used when sending
@@ -3353,7 +3474,7 @@ extern int net_stats_prometheus_scrape(struct prometheus_collector *collector,
 	};								\
 	static Z_DECL_ALIGN(struct net_if)				\
 		NET_IF_GET_NAME(dev_id, sfx)[NET_IF_MAX_CONFIGS]	\
-		       __used __in_section(_net_if, static,		\
+		       __used __noasan __in_section(_net_if, static,	\
 					   dev_id) = {			\
 		[0 ... (NET_IF_MAX_CONFIGS - 1)] = {			\
 			.if_dev = &(NET_IF_DEV_GET_NAME(dev_id, sfx)),	\
@@ -3373,6 +3494,16 @@ extern int net_stats_prometheus_scrape(struct prometheus_collector *collector,
 /** @endcond */
 
 /* Network device initialization macros */
+
+/**
+ * @brief Forward declaration of a network interface
+ *
+ * Enables to use of `NET_IF_GET` above the instantiation macro.
+ *
+ * @param dev_id Device ID provided to `NET_IF_INIT` or `NET_IF_OFFLOAD_INIT`
+ */
+#define NET_IF_DECLARE(dev_id, inst) \
+	static struct net_if NET_IF_GET_NAME(dev_id, inst)[NET_IF_MAX_CONFIGS]
 
 #define Z_NET_DEVICE_INIT_INSTANCE(node_id, dev_id, name, instance,	\
 				   init_fn, pm, data, config, prio,	\

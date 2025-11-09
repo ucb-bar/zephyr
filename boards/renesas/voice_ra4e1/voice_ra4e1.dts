@@ -22,6 +22,7 @@
 		zephyr,console = &uart3;
 		zephyr,shell-uart = &uart3;
 		zephyr,entropy = &trng;
+		zephyr,crc = &crc;
 	};
 
 	leds {
@@ -46,6 +47,7 @@
 	aliases {
 		led0 = &led1;
 		sw0 = &button0;
+		watchdog0 = &wdt;
 	};
 };
 
@@ -129,7 +131,22 @@
 	pinctrl-names = "default";
 	maximum-speed = "full-speed";
 	status = "okay";
+
 	zephyr_udc0: udc {
 		status = "okay";
 	};
+};
+
+&wdt {
+	status = "okay";
+};
+
+&dac0 {
+	pinctrl-0 = <&dac0_default>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&crc {
+	status = "okay";
 };

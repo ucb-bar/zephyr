@@ -22,7 +22,13 @@ check_set_linker_property(TARGET linker PROPERTY orphan_error
                           ${LINKERFLAGPREFIX},--orphan-handling=error
 )
 
+set_property(TARGET linker PROPERTY undefined ${LINKERFLAGPREFIX},--undefined=)
+
 check_set_linker_property(TARGET linker PROPERTY memusage "${LINKERFLAGPREFIX},--print-memory-usage")
+
+check_set_linker_property(TARGET linker PROPERTY sanitizer_undefined -fsanitize=undefined)
+check_set_linker_property(TARGET linker PROPERTY sanitizer_undefined_trap -fsanitize-undefined-trap-on-error)
+check_set_linker_property(TARGET linker PROPERTY sanitizer_undefined_library)
 
 # -no-pie is not supported until binutils 2.37.
 # If -no-pie is passed to old binutils <= 2.36, it is parsed

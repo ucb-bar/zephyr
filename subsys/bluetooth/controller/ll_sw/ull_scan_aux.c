@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/devicetree.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/slist.h>
 #include <zephyr/sys/util.h>
@@ -583,8 +584,9 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_pdu *rx)
 	 */
 	if (!aux_ptr || !PDU_ADV_AUX_PTR_OFFSET_GET(aux_ptr) || is_scan_req ||
 	    (PDU_ADV_AUX_PTR_PHY_GET(aux_ptr) > EXT_ADV_AUX_PHY_LE_CODED) ||
-		(!IS_ENABLED(CONFIG_BT_CTLR_PHY_CODED) &&
-		  PDU_ADV_AUX_PTR_PHY_GET(aux_ptr) == EXT_ADV_AUX_PHY_LE_CODED)) {
+	    (!IS_ENABLED(CONFIG_BT_CTLR_PHY_CODED) &&
+	     PDU_ADV_AUX_PTR_PHY_GET(aux_ptr) == EXT_ADV_AUX_PHY_LE_CODED) ||
+	    (aux_ptr->chan_idx >= CHM_USED_COUNT_MAX)) {
 		if (IS_ENABLED(CONFIG_BT_CTLR_SYNC_PERIODIC) && sync_lll) {
 			struct ll_sync_set *sync_set;
 
@@ -845,6 +847,13 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_pdu *rx)
 		if (unlikely(scan->is_stop)) {
 			goto ull_scan_aux_rx_flush;
 		}
+
+		/* Remove auxiliary context association with scan context so
+		 * that LLL can differentiate it to being ULL scheduling.
+		 */
+		if ((lll != NULL) && (lll->lll_aux == lll_aux)) {
+			lll->lll_aux = NULL;
+		}
 	} else {
 		struct ll_sync_set *sync_set;
 
@@ -872,19 +881,12 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_pdu *rx)
 		aux->rx_head = rx;
 	}
 
-	/* TODO: active_to_start feature port */
-	aux->ull.ticks_active_to_start = 0;
-	aux->ull.ticks_prepare_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
-	aux->ull.ticks_preempt_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 	aux->ull.ticks_slot = HAL_TICKER_US_TO_TICKS_CEIL(
 		EVENT_OVERHEAD_START_US + ready_delay_us +
 		PDU_AC_MAX_US(PDU_AC_EXT_PAYLOAD_RX_SIZE, lll_aux->phy) +
 		EVENT_OVERHEAD_END_US);
 
-	ticks_slot_offset = MAX(aux->ull.ticks_active_to_start,
-				aux->ull.ticks_prepare_to_start);
+	ticks_slot_offset = HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
 	if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT)) {
 		ticks_slot_overhead = ticks_slot_offset;
 	} else {
@@ -1385,6 +1387,10 @@ static void flush_safe(void *param)
 		LL_ASSERT(!hdr->disabled_cb);
 		hdr->disabled_param = aux;
 		hdr->disabled_cb = done_disabled_cb;
+
+		/* NOTE: we are not forcing a lll_disable, we will let window
+		 *       close at its duration or when preempted.
+		 */
 	}
 }
 
@@ -1428,6 +1434,11 @@ static void flush(void *param)
 	scan = HDR_LLL2ULL(lll);
 	scan = ull_scan_is_valid_get(scan);
 	if (!IS_ENABLED(CONFIG_BT_CTLR_SYNC_PERIODIC) || scan) {
+		/* Remove auxiliary context association with scan context */
+		if (lll->lll_aux == &aux->lll) {
+			lll->lll_aux = NULL;
+		}
+
 #if defined(CONFIG_BT_CTLR_JIT_SCHEDULING)
 		lll->scan_aux_score = aux->lll.hdr.score;
 #endif /* CONFIG_BT_CTLR_JIT_SCHEDULING */
@@ -1994,9 +2005,9 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_pdu *rx)
 	 */
 	if (!aux_ptr || !PDU_ADV_AUX_PTR_OFFSET_GET(aux_ptr) || is_scan_req ||
 	    (PDU_ADV_AUX_PTR_PHY_GET(aux_ptr) > EXT_ADV_AUX_PHY_LE_CODED) ||
-		(!IS_ENABLED(CONFIG_BT_CTLR_PHY_CODED) &&
-		  PDU_ADV_AUX_PTR_PHY_GET(aux_ptr) == EXT_ADV_AUX_PHY_LE_CODED)) {
-
+	    (!IS_ENABLED(CONFIG_BT_CTLR_PHY_CODED) &&
+	     PDU_ADV_AUX_PTR_PHY_GET(aux_ptr) == EXT_ADV_AUX_PHY_LE_CODED) ||
+	    (aux_ptr->chan_idx >= CHM_USED_COUNT_MAX)) {
 		if (is_scan_req) {
 			LL_ASSERT(chain && chain->rx_last);
 
@@ -2055,6 +2066,10 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_pdu *rx)
 		uint32_t ticks_now;
 		uint32_t diff;
 
+#if defined(CONFIG_BT_TICKER_SLOT_AGNOSTIC)
+		/* CPU execution overhead to setup the radio for reception */
+		overhead_us = EVENT_OVERHEAD_START_US;
+#else /* !CONFIG_BT_TICKER_SLOT_AGNOSTIC */
 		/* CPU execution overhead to setup the radio for reception plus the
 		 * minimum prepare tick offset. And allow one additional event in
 		 * between as overhead (say, an advertising event in between got closed
@@ -2062,6 +2077,7 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_pdu *rx)
 		 */
 		overhead_us = (EVENT_OVERHEAD_END_US + EVENT_OVERHEAD_START_US +
 			       HAL_TICKER_TICKS_TO_US(HAL_TICKER_CNTR_CMP_OFFSET_MIN)) << 1;
+#endif /* !CONFIG_BT_TICKER_SLOT_AGNOSTIC */
 
 		ticks_now = ticker_ticks_now_get();
 		ticks_at_expire = ftr->ticks_anchor + ticks_aux_offset -
@@ -2608,10 +2624,13 @@ static void flush_safe(void *param)
 	/* If chain is active we need to flush from disabled callback */
 	if (chain_is_in_list(scan_aux_set.active_chains, chain) &&
 	    ull_ref_get(&scan_aux_set.ull)) {
-
 		chain->next = scan_aux_set.flushing_chains;
 		scan_aux_set.flushing_chains = chain;
 		scan_aux_set.ull.disabled_cb = done_disabled_cb;
+
+		/* NOTE: we are not forcing a lll_disable, we will let window
+		 *       close at its duration or when preempted.
+		 */
 	} else {
 		flush(chain);
 	}
@@ -2760,19 +2779,12 @@ static void chain_start_ticker(struct ll_scan_aux_chain *chain, bool replace)
 
 	ready_delay_us = lll_radio_rx_ready_delay_get(chain->lll.phy, PHY_FLAGS_S8);
 
-	/* TODO: active_to_start feature port */
-	scan_aux_set.ull.ticks_active_to_start = 0;
-	scan_aux_set.ull.ticks_prepare_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
-	scan_aux_set.ull.ticks_preempt_to_start =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 	scan_aux_set.ull.ticks_slot = HAL_TICKER_US_TO_TICKS_CEIL(
 		EVENT_OVERHEAD_START_US + ready_delay_us +
 		PDU_AC_MAX_US(PDU_AC_EXT_PAYLOAD_RX_SIZE, chain->lll.phy) +
 		EVENT_OVERHEAD_END_US);
 
-	ticks_slot_offset = MAX(scan_aux_set.ull.ticks_active_to_start,
-				scan_aux_set.ull.ticks_prepare_to_start);
+	ticks_slot_offset = HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
 	if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT)) {
 		ticks_slot_overhead = ticks_slot_offset;
 	} else {

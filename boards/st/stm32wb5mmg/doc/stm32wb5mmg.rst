@@ -7,7 +7,7 @@ STM32WB5MMG is an ultra-low-power and small form factor certified 2.4 GHz
 wireless module. It supports Bluetooth|reg| Low Energy 5.4, Zigbee|reg| 3.0,
 OpenThread, dynamic, and static concurrent modes, and 802.15.4 proprietary
 protocols. This board support is added in order to make it possible use this
-module on other boards as HCI layer (Specefically B-U585I-IOT02A Development board).
+module on other boards as HCI layer (Specifically B-U585I-IOT02A Development board).
 
 STM32WB5MMG supports the following features:
 
@@ -206,6 +206,8 @@ Rather, users can use the available USB port (CN12) to run virtual com port
 
 Programming and Debugging
 *************************
+
+.. zephyr:board-supported-runners::
 
 Applications for the ``stm32wb5mmg`` board configuration can be built the
 usual way (see :ref:`build_an_application`).

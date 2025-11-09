@@ -48,13 +48,15 @@ LED
 Programming and Debugging
 *************************
 
+.. zephyr:board-supported-runners::
+
 Applications for the ``promicro_nrf52840/nrf52840`` board target can be
 built in the usual way (see :ref:`build_an_application` for more details).
 
 Flashing
 ========
 
-The board is factory-programmed with Adafruit's UF2 booloader
+The board is factory-programmed with Adafruit's UF2 bootloader
 
 #. Reset the board into the bootloader by bridging ground and RST 2 times
 quickly

@@ -125,7 +125,7 @@ static int recv_data(struct net_socket_service_event *pev)
 	socklen_t optlen = sizeof(int);
 	struct net_buf *dns_data = NULL;
 	struct sockaddr addr;
-	size_t addrlen;
+	socklen_t addrlen;
 	int family, sock_error;
 	int ret = 0, len;
 
@@ -343,6 +343,10 @@ int dns_dispatcher_unregister(struct dns_socket_dispatcher *ctx)
 		CHECKIF((int)ctx->fds[i].fd >= (int)ARRAY_SIZE(dispatch_table)) {
 			ret = -ERANGE;
 			goto out;
+		}
+
+		if (ctx->fds[i].fd < 0) {
+			continue;
 		}
 
 		dispatch_table[ctx->fds[i].fd].ctx = NULL;

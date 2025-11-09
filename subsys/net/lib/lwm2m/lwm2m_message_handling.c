@@ -383,6 +383,7 @@ STATIC int build_msg_block_for_send(struct lwm2m_message *msg, uint16_t block_nu
 	ret = buf_append(CPKT_BUF_WRITE(&msg->cpkt),
 			 complete_payload + (block_num * block_size_bytes), payload_size);
 	if (ret < 0) {
+		LOG_ERR("CoAP message size overflow");
 		return ret;
 	}
 
@@ -392,19 +393,16 @@ STATIC int build_msg_block_for_send(struct lwm2m_message *msg, uint16_t block_nu
 STATIC int prepare_msg_for_send(struct lwm2m_message *msg)
 {
 	int ret;
-	uint16_t len;
-	const uint8_t *payload;
-
 	/* save the big buffer for later use (splitting blocks) */
 	msg->body_encode_buffer = msg->cpkt;
 
 	/* set the default (small) buffer for sending blocks */
 	msg->cpkt.data = msg->msg_data;
 	msg->cpkt.offset = 0;
-	msg->cpkt.max_len = MAX_PACKET_SIZE;
+	msg->cpkt.max_len = sizeof(msg->msg_data);
 
-	payload = coap_packet_get_payload(&msg->body_encode_buffer, &len);
-	if (len <= CONFIG_LWM2M_COAP_MAX_MSG_SIZE) {
+	/* Can we fit a whole message into one frame */
+	if (msg->body_encode_buffer.offset <= msg->cpkt.max_len) {
 
 		/* copy the packet */
 		ret = buf_append(CPKT_BUF_WRITE(&msg->cpkt), msg->body_encode_buffer.data,
@@ -422,6 +420,9 @@ STATIC int prepare_msg_for_send(struct lwm2m_message *msg)
 
 		NET_ASSERT(msg->out.block_ctx == NULL, "Expecting to have no context to release");
 	} else {
+		uint16_t len;
+		const uint8_t *payload = coap_packet_get_payload(&msg->body_encode_buffer, &len);
+
 		/* Before splitting the content, append Etag option to protect the integrity of
 		 * the payload.
 		 */
@@ -461,6 +462,9 @@ void lwm2m_engine_context_close(struct lwm2m_ctx *client_ctx)
 
 	for (i = 0, msg = messages; i < ARRAY_SIZE(messages); i++, msg++) {
 		if (msg->ctx == client_ctx) {
+			if (msg->send_status_cb) {
+				msg->send_status_cb(LWM2M_SEND_STATUS_FAILURE);
+			}
 			lwm2m_reset_message(msg, true);
 		}
 	}
@@ -1052,9 +1056,6 @@ static int lwm2m_write_handler_opaque(struct lwm2m_engine_obj_inst *obj_inst,
 			if (ret < 0) {
 				return ret;
 			}
-		}
-		if (msg->in.block_ctx && !last_pkt_block) {
-			msg->in.block_ctx->ctx.current += len;
 		}
 		opaque_ctx.offset += len;
 		written += len;
@@ -2646,6 +2647,7 @@ static int lwm2m_response_promote_to_con(struct lwm2m_message *msg)
 
 	msg->type = COAP_TYPE_CON;
 	msg->mid = coap_next_id();
+	msg->acknowledged = false;
 
 	/* Since the response CoAP packet is already generated at this point,
 	 * tweak the specific fields manually:
@@ -2878,6 +2880,16 @@ void lwm2m_udp_receive(struct lwm2m_ctx *client_ctx, uint8_t *buf, uint16_t buf_
 		}
 
 		LOG_DBG("reply %p handled and removed", reply);
+		goto client_unlock;
+	} else if (pending && coap_header_get_type(&response) == COAP_TYPE_RESET) {
+		msg = find_msg(pending, NULL);
+		if (msg == NULL) {
+			LOG_ERR("Orphaned pending %p.", pending);
+			coap_pending_clear(pending);
+			goto client_unlock;
+		}
+
+		lwm2m_reset_message(msg, true);
 		goto client_unlock;
 	}
 
@@ -3199,6 +3211,7 @@ msg_init:
 	obs->active_notify = msg;
 	obs->resource_update = false;
 	lwm2m_information_interface_send(msg);
+	lwm2m_engine_observer_refresh_notified_values(obs);
 #if defined(CONFIG_LWM2M_RESOURCE_DATA_CACHE_SUPPORT)
 	msg->cache_info = NULL;
 #endif
@@ -3291,6 +3304,10 @@ int lwm2m_perform_composite_read_op(struct lwm2m_message *msg, uint16_t content_
 
 		ret = lwm2m_perform_read_object_instance(msg, obj_inst, &num_read);
 		if (ret == -ENOMEM) {
+			if (num_read > 0) {
+				/* Return what we have read so far */
+				goto put_end;
+			}
 			return ret;
 		}
 	}
@@ -3299,6 +3316,7 @@ int lwm2m_perform_composite_read_op(struct lwm2m_message *msg, uint16_t content_
 		return -ENOENT;
 	}
 
+put_end:
 	/* Add object end mark */
 	if (engine_put_end(&msg->out, &msg->path) < 0) {
 		return -ENOMEM;

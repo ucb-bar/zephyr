@@ -31,8 +31,12 @@ extern "C" {
 #define sys_port_trace_k_thread_join_enter(thread, timeout)
 #define sys_port_trace_k_thread_join_blocking(thread, timeout)
 #define sys_port_trace_k_thread_join_exit(thread, timeout, ret)
-#define sys_port_trace_k_thread_sleep_enter(timeout)
-#define sys_port_trace_k_thread_sleep_exit(timeout, ret)
+
+#define sys_port_trace_k_thread_sleep_enter(timeout)                           \
+	sys_trace_k_thread_sleep_enter(timeout)
+#define sys_port_trace_k_thread_sleep_exit(timeout, ret)                       \
+	sys_trace_k_thread_sleep_exit(timeout, ret)
+
 #define sys_port_trace_k_thread_msleep_enter(ms)
 #define sys_port_trace_k_thread_msleep_exit(ms, ret)
 #define sys_port_trace_k_thread_usleep_enter(us)
@@ -263,6 +267,9 @@ extern "C" {
 #define sys_port_trace_k_msgq_put_enter(msgq, timeout)
 #define sys_port_trace_k_msgq_put_blocking(msgq, timeout)
 #define sys_port_trace_k_msgq_put_exit(msgq, timeout, ret)
+#define sys_port_trace_k_msgq_put_front_enter(msgq, timeout)
+#define sys_port_trace_k_msgq_put_front_blocking(msgq, timeout)
+#define sys_port_trace_k_msgq_put_front_exit(msgq, timeout, ret)
 #define sys_port_trace_k_msgq_get_enter(msgq, timeout)
 #define sys_port_trace_k_msgq_get_blocking(msgq, timeout)
 #define sys_port_trace_k_msgq_get_exit(msgq, timeout, ret)
@@ -294,24 +301,9 @@ extern "C" {
 #define sys_port_trace_k_pipe_read_blocking(pipe, timeout)
 #define sys_port_trace_k_pipe_read_exit(pipe, ret)
 
-#define sys_port_trace_k_pipe_cleanup_enter(pipe)
-#define sys_port_trace_k_pipe_cleanup_exit(pipe, ret)
-#define sys_port_trace_k_pipe_alloc_init_enter(pipe)
-#define sys_port_trace_k_pipe_alloc_init_exit(pipe, ret)
-#define sys_port_trace_k_pipe_flush_enter(pipe)
-#define sys_port_trace_k_pipe_flush_exit(pipe)
-#define sys_port_trace_k_pipe_buffer_flush_enter(pipe)
-#define sys_port_trace_k_pipe_buffer_flush_exit(pipe)
-#define sys_port_trace_k_pipe_put_enter(pipe, timeout)
-#define sys_port_trace_k_pipe_put_blocking(pipe, timeout)
-#define sys_port_trace_k_pipe_put_exit(pipe, timeout, ret)
-#define sys_port_trace_k_pipe_get_enter(pipe, timeout)
-#define sys_port_trace_k_pipe_get_blocking(pipe, timeout)
-#define sys_port_trace_k_pipe_get_exit(pipe, timeout, ret)
-
 #define sys_port_trace_k_heap_init(heap)
 #define sys_port_trace_k_heap_aligned_alloc_enter(heap, timeout)
-#define sys_port_trace_k_heap_aligned_alloc_blocking(heap, timeout)
+#define sys_port_trace_k_heap_alloc_helper_blocking(heap, timeout)
 #define sys_port_trace_k_heap_aligned_alloc_exit(heap, timeout, ret)
 #define sys_port_trace_k_heap_alloc_enter(heap, timeout)
 #define sys_port_trace_k_heap_alloc_exit(heap, timeout, ret)
@@ -551,17 +543,17 @@ void sys_trace_socket_connect_exit(int sock, int ret);
 void sys_trace_socket_listen_enter(int sock, int backlog);
 void sys_trace_socket_listen_exit(int sock, int ret);
 void sys_trace_socket_accept_enter(int sock);
-void sys_trace_socket_accept_exit(int sock, const struct sockaddr *addr, const size_t *addrlen,
+void sys_trace_socket_accept_exit(int sock, const struct sockaddr *addr, const uint32_t *addrlen,
 				  int ret);
 void sys_trace_socket_sendto_enter(int sock, int len, int flags, const struct sockaddr *dest_addr,
-				   size_t addrlen);
+				   uint32_t addrlen);
 void sys_trace_socket_sendto_exit(int sock, int ret);
 void sys_trace_socket_sendmsg_enter(int sock, const struct msghdr *msg, int flags);
 void sys_trace_socket_sendmsg_exit(int sock, int ret);
 void sys_trace_socket_recvfrom_enter(int sock, int max_len, int flags, struct sockaddr *addr,
-				     size_t *addrlen);
+				     uint32_t *addrlen);
 void sys_trace_socket_recvfrom_exit(int sock, const struct sockaddr *src_addr,
-				    const size_t *addrlen, int ret);
+				    const uint32_t *addrlen, int ret);
 void sys_trace_socket_recvmsg_enter(int sock, const struct msghdr *msg, int flags);
 void sys_trace_socket_recvmsg_exit(int sock, const struct msghdr *msg, int ret);
 void sys_trace_socket_fcntl_enter(int sock, int cmd, int flags);
@@ -577,11 +569,11 @@ void sys_trace_socket_setsockopt_enter(int sock, int level, int optname, const v
 				       size_t optlen);
 void sys_trace_socket_setsockopt_exit(int sock, int ret);
 void sys_trace_socket_getpeername_enter(int sock);
-void sys_trace_socket_getpeername_exit(int sock,  struct sockaddr *addr, const size_t *addrlen,
+void sys_trace_socket_getpeername_exit(int sock, struct sockaddr *addr, const uint32_t *addrlen,
 				       int ret);
 void sys_trace_socket_getsockname_enter(int sock);
-void sys_trace_socket_getsockname_exit(int sock, const struct sockaddr *addr, const size_t *addrlen,
-				       int ret);
+void sys_trace_socket_getsockname_exit(int sock, const struct sockaddr *addr,
+				       const uint32_t *addrlen, int ret);
 void sys_trace_socket_socketpair_enter(int family, int type, int proto, int *sv);
 void sys_trace_socket_socketpair_exit(int sock_A, int sock_B, int ret);
 
