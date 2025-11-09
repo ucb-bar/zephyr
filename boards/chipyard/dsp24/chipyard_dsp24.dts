@@ -9,6 +9,11 @@
 		zephyr,sram = &ram0;
 		zephyr,flash = &flash0;
 	};
+
+	aliases {
+		bmi088-accel = &bmi088_accel;
+		bmi088-gyro = &bmi088_gyro;
+	};
 };
 
 &uart0 {
@@ -18,6 +23,20 @@
 
 &i2c0 {
 	status = "okay";
+
+	bmi088_accel: bmi08x@69 {
+		compatible = "bosch,bmi08x-accel";
+		reg = <0x18>;
+		accel-hz = "800";
+		accel-fs = <6>;
+	};
+
+	bmi088_gyro: bmi08x@18 {
+		compatible = "bosch,bmi08x-gyro";
+		reg = <0x69>;
+		gyro-hz = "1000_116";
+		gyro-fs = <1000>;
+	};
 };
 
 &htif {
