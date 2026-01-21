@@ -1,0 +1,51 @@
+/dts-v1/;
+
+#include <chipyard/chipyard-riscv64.dtsi>
+
+/ {
+	chosen {
+		zephyr,console= &htif;
+		zephyr,shell-uart = &htif;
+		zephyr,sram = &ram0;
+	};
+};
+
+&uart0 {
+	status = "okay";
+	current-speed = <115200>;  // Set appropriate baud rate
+};
+
+&htif {
+	status = "okay";
+};
+
+// Backing DRAM (256MB)
+&ram0 {
+	reg = < 0x80000000 0x010000000 >;
+};
+
+// Noncoherent spad (64KB)
+&spad0 {
+	reg = < 0x08000000 0x00010000 >;
+};
+
+// Coherent spad (128KB) - requires 64-bit addressing
+// Create a parent node with 64-bit address cells for high-address memories
+/ {
+	mem64: memory-controller {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		
+		spad1: memory@580000000 {
+			device_type = "memory";
+			reg = <0x5 0x80000000 0x0 0x20000>;
+		};
+	};
+};
+
+&flash0 {
+	status = "disabled";
+};
+
+
