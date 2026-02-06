@@ -35,4 +35,8 @@ extern volatile uint64_t fromhost;
 // Global HTIF mutex for synchronization
 extern struct k_mutex htif_lock;
 
+#if defined(CONFIG_UART_HTIF)
+void htif_debug_write_tohost(uint64_t value);
+#endif
+
 #endif // ZEPHYR_DRIVERS_HTIF_H

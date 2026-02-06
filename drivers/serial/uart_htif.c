@@ -29,6 +29,12 @@ LOG_MODULE_REGISTER(uart_htif, CONFIG_UART_LOG_LEVEL);
 	#define HTIF_WAIT_SLEEP() /* do nothing */
 #endif
 
+#ifdef CONFIG_UART_HTIF_FIXED_DELAY
+	#define HTIF_FIXED_DELAY() do { for (volatile int i = 0; i < 10000000; i++); } while (0)
+#else
+	#define HTIF_FIXED_DELAY() /* do nothing */
+#endif
+
 /* HTIF Memory-Mapped Registers */
 volatile uint64_t tohost __attribute__((section(".htif")));
 volatile uint64_t fromhost __attribute__((section(".htif")));
@@ -71,6 +77,13 @@ struct k_mutex htif_lock;
  * Optimized wait loop: Wait until the HTIF tohost register is ready,
  * optionally yielding or sleeping to reduce CPU load.
  */
+#ifdef CONFIG_UART_HTIF_FIXED_DELAY
+static inline void htif_wait_for_ready(void)
+{
+	HTIF_FIXED_DELAY();
+	fromhost = 0;  /* Acknowledge any pending responses */
+}
+#else
 static inline void htif_wait_for_ready(void)
 {
 	while (tohost != 0) {
@@ -80,6 +93,7 @@ static inline void htif_wait_for_ready(void)
 		HTIF_WAIT_SLEEP();
 	}
 }
+#endif
 
 /*
  * --- Optional Buffered Output Feature ---
@@ -131,8 +145,15 @@ long htif_syscall(uint64_t a0, uint64_t a1, uint64_t a2, unsigned long n)
     k_mutex_lock(&htif_lock, K_FOREVER);
     wmb();
     tohost = sc;
-    while (fromhost == 0);
+#ifdef CONFIG_UART_HTIF_FIXED_DELAY
+    HTIF_FIXED_DELAY();
     fromhost = 0;
+#else
+    while (fromhost == 0) {
+        HTIF_WAIT_SLEEP();
+    }
+    fromhost = 0;
+#endif
     k_mutex_unlock(&htif_lock);
 
     rmb();
@@ -226,9 +247,13 @@ static int uart_htif_poll_in(const struct device *dev, unsigned char *p_char)
 	tohost = TOHOST_CMD(HTIF_DEV_CONSOLE, HTIF_CONSOLE_CMD_GETC, 0);
 
 	/* Wait for response */
+#ifdef CONFIG_UART_HTIF_FIXED_DELAY
+	HTIF_FIXED_DELAY();
+#else
 	while (fromhost == 0) {
 		HTIF_WAIT_SLEEP();
 	}
+#endif
 
 	/* Extract received character */
 	ch = FROMHOST_DATA(fromhost);

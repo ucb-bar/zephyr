@@ -43,3 +43,19 @@ void sys_arch_reboot(int type)
     while (1);  // Halt execution
 	#endif
 }
+
+#if defined(CONFIG_UART_HTIF)
+void htif_debug_write_tohost(uint64_t value)
+{
+    #ifdef CONFIG_MULTITHREADING
+    k_mutex_lock(&htif_lock, K_FOREVER);
+    #endif
+    for (volatile int i = 0; i < 1000000; i++);
+
+    // htif_wait_for_ready();
+    tohost = value;
+    #ifdef CONFIG_MULTITHREADING
+    k_mutex_unlock(&htif_lock);
+    #endif
+}
+#endif

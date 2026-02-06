@@ -46,4 +46,13 @@ config UART_HTIF_BUFFERED_OUTPUT_SIZE
       transmitted in one operation.
 #endif
 
+config UART_HTIF_FIXED_DELAY
+    bool "Use fixed delay instead of handshake"
+    default n
+    depends on UART_HTIF
+    help
+      When enabled, the HTIF driver uses a fixed busy-wait delay (volatile loop)
+      instead of waiting for host acknowledgment. This can be useful for debugging
+      or in environments where the host response is unreliable.
+
 endif # UART_HTIF
