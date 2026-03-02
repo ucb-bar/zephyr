@@ -1,0 +1,33 @@
+if BOARD_CHIPYARD_KODIAK
+
+config BUILD_OUTPUT_BIN
+	default n
+
+config HAS_COVERAGE_SUPPORT
+	default y
+
+config QEMU_ICOUNT_SHIFT
+	default 6 if QEMU_ICOUNT
+
+config CHIPYARD_KODIAK_RAM_NONCOHERENT_SPAD
+	bool "Use Noncoherent SPAD (64KB)"
+	default n
+	help
+	  Use noncoherent scratchpad memory at 0x08000000 (64KB).
+	  This option is mutually exclusive with other RAM type options.
+
+config CHIPYARD_KODIAK_RAM_COHERENT_SPAD
+	bool "Use Coherent SPAD (128KB)"
+	default n
+	help
+	  Use coherent scratchpad memory at 0x580000000 (128KB).
+	  This option is mutually exclusive with other RAM type options.
+
+config CHIPYARD_KODIAK_RAM_BACKING_DRAM
+	bool "Use Backing DRAM (256MB)"
+	default y
+	help
+	  Use backing DRAM at 0x80000000 (256MB).
+	  This is the default option and is mutually exclusive with other RAM type options.
+
+endif # BOARD_CHIPYARD_KODIAK
