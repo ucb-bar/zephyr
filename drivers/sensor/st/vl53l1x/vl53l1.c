@@ -39,6 +39,7 @@ struct vl53l1x_data {
 	VL53L1_Dev_t vl53l1x;
 	VL53L1_RangingMeasurementData_t data;
 	VL53L1_DistanceModes distance_mode;
+	bool initialized;  /* Track if sensor has been initialized */
 #ifdef CONFIG_VL53L1X_INTERRUPT_MODE
 	struct gpio_callback gpio_cb;
 	struct k_work work;
@@ -116,11 +117,20 @@ static int vl53l1x_init_interrupt(const struct device *dev)
 }
 #endif
 
+/* Initialize the VL53L1X sensor. Can be called multiple times safely.
+ * Returns 0 on success, negative error code on failure.
+ */
 static int vl53l1x_initialize(const struct device *dev)
 {
 	struct vl53l1x_data *drv_data = dev->data;
 	VL53L1_Error ret;
 	VL53L1_DeviceInfo_t vl53l1x_dev_info;
+
+	/* If already initialized, skip */
+	if (drv_data->initialized) {
+		LOG_DBG("[%s] Already initialized, skipping", dev->name);
+		return 0;
+	}
 
 	LOG_DBG("[%s] Initializing ", dev->name);
 
@@ -166,6 +176,9 @@ static int vl53l1x_initialize(const struct device *dev)
 	}
 
 	LOG_DBG("[%s] VL53L1X_GetDeviceInfo returned %d", dev->name, ret);
+	
+	/* Mark as initialized */
+	drv_data->initialized = true;
 	LOG_DBG("   Device Name : %s", vl53l1x_dev_info.Name);
 	LOG_DBG("   Device Type : %s", vl53l1x_dev_info.Type);
 	LOG_DBG("   Device ID : %s", vl53l1x_dev_info.ProductId);
@@ -197,6 +210,15 @@ static int vl53l1x_set_mode(const struct device *dev,
 {
 	struct vl53l1x_data *drv_data = dev->data;
 	VL53L1_Error ret;
+	int init_ret;
+
+	/* Auto-initialize if not already initialized */
+	if (!drv_data->initialized) {
+		init_ret = vl53l1x_initialize(dev);
+		if (init_ret != 0) {
+			return init_ret;
+		}
+	}
 
 	switch (val->val1) {
 	/* short */
@@ -233,6 +255,15 @@ static int vl53l1x_set_roi(const struct device *dev,
 {
 	struct vl53l1x_data *drv_data = dev->data;
 	VL53L1_Error ret;
+	int init_ret;
+
+	/* Auto-initialize if not already initialized */
+	if (!drv_data->initialized) {
+		init_ret = vl53l1x_initialize(dev);
+		if (init_ret != 0) {
+			return init_ret;
+		}
+	}
 
 	if ((val->val1 < 0) ||
 	    (val->val2 < 0) ||
@@ -265,6 +296,15 @@ static int vl53l1x_get_mode(const struct device *dev,
 	struct vl53l1x_data *drv_data = dev->data;
 	VL53L1_DistanceModes mode;
 	VL53L1_Error ret;
+	int init_ret;
+
+	/* Auto-initialize if not already initialized */
+	if (!drv_data->initialized) {
+		init_ret = vl53l1x_initialize(dev);
+		if (init_ret != 0) {
+			return init_ret;
+		}
+	}
 
 	ret = VL53L1_GetDistanceMode(&drv_data->vl53l1x, &mode);
 	if (ret != VL53L1_ERROR_NONE) {
@@ -284,6 +324,15 @@ static int vl53l1x_get_roi(const struct device *dev,
 	struct vl53l1x_data *drv_data = dev->data;
 	VL53L1_Error ret;
 	VL53L1_UserRoi_t pUserROi;
+	int init_ret;
+
+	/* Auto-initialize if not already initialized */
+	if (!drv_data->initialized) {
+		init_ret = vl53l1x_initialize(dev);
+		if (init_ret != 0) {
+			return init_ret;
+		}
+	}
 
 	ret = VL53L1_GetUserROI(&drv_data->vl53l1x, &pUserROi);
 	if (ret != VL53L1_ERROR_NONE) {
@@ -452,13 +501,25 @@ static int vl53l1x_init(const struct device *dev)
 		}
 #endif
 
-	ret = vl53l1x_initialize(dev);
-	if (ret) {
-		return ret;
+	/* Mark as not initialized - will be initialized on first use or via explicit call */
+	drv_data->initialized = false;
+
+	LOG_DBG("[%s] Device setup complete, sensor initialization deferred", dev->name);
+	return 0;
+}
+
+/* Public API function to manually initialize the sensor at runtime.
+ * This is useful when the sensor needs to be initialized after address
+ * reprogramming or power cycling.
+ * Returns 0 on success, negative error code on failure.
+ */
+int vl53l1x_reinit(const struct device *dev)
+{
+	if (dev == NULL) {
+		return -EINVAL;
 	}
 
-	LOG_DBG("[%s] Initialized", dev->name);
-	return 0;
+	return vl53l1x_initialize(dev);
 }
 
 #define VL53L1X_INIT(i) \
