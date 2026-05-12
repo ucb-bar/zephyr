@@ -659,11 +659,44 @@ int pthread_create(pthread_t *th, const pthread_attr_t *_attr, void *(*threadrou
 	}
 
 	/* spawn the thread */
+#ifdef CONFIG_POSIX_THREADS_AFFINITY
+	{
+		k_timeout_t start_delay = K_NO_WAIT;
+		bool pin_after_create = t->attr.cpu_affinity_set && t->attr.cpu_affinity != 0;
+
+		if (pin_after_create) {
+			/* k_thread_cpu_mask_* requires the thread not currently
+			 * runnable, so create suspended, mask, then start.
+			 */
+			start_delay = K_FOREVER;
+		}
+
+		k_thread_create(&t->thread, t->attr.stack,
+				__get_attr_stacksize(&t->attr) + t->attr.guardsize,
+				zephyr_thread_wrapper, (void *)arg, threadroutine,
+				IS_ENABLED(CONFIG_PTHREAD_CREATE_BARRIER)
+					? UINT_TO_POINTER(barrier) : NULL,
+				posix_to_zephyr_priority(t->attr.priority,
+							 t->attr.schedpolicy),
+				0, start_delay);
+
+		if (pin_after_create) {
+			(void)k_thread_cpu_mask_clear(&t->thread);
+			for (int cpu = 0; cpu < CONFIG_MP_MAX_NUM_CPUS; cpu++) {
+				if (t->attr.cpu_affinity & (1ULL << cpu)) {
+					(void)k_thread_cpu_mask_enable(&t->thread, cpu);
+				}
+			}
+			k_thread_start(&t->thread);
+		}
+	}
+#else
 	k_thread_create(
 		&t->thread, t->attr.stack, __get_attr_stacksize(&t->attr) + t->attr.guardsize,
 		zephyr_thread_wrapper, (void *)arg, threadroutine,
 		IS_ENABLED(CONFIG_PTHREAD_CREATE_BARRIER) ? UINT_TO_POINTER(barrier) : NULL,
 		posix_to_zephyr_priority(t->attr.priority, t->attr.schedpolicy), 0, K_NO_WAIT);
+#endif
 
 	if (IS_ENABLED(CONFIG_PTHREAD_CREATE_BARRIER)) {
 		/* wait for the spawned thread to cross our barrier */
@@ -1433,6 +1466,35 @@ int pthread_attr_destroy(pthread_attr_t *_attr)
 
 	return 0;
 }
+
+#ifdef CONFIG_POSIX_THREADS_AFFINITY
+int pthread_attr_setaffinity_np(pthread_attr_t *_attr, size_t cpusetsize,
+				const cpu_set_t *cpuset)
+{
+	struct posix_thread_attr *attr = (struct posix_thread_attr *)_attr;
+
+	if (!__attr_is_initialized(attr) || cpuset == NULL ||
+	    cpusetsize != sizeof(cpu_set_t)) {
+		return EINVAL;
+	}
+	attr->cpu_affinity = cpuset->bits;
+	attr->cpu_affinity_set = (cpuset->bits != 0);
+	return 0;
+}
+
+int pthread_attr_getaffinity_np(const pthread_attr_t *_attr, size_t cpusetsize,
+				cpu_set_t *cpuset)
+{
+	const struct posix_thread_attr *attr = (const struct posix_thread_attr *)_attr;
+
+	if (!__attr_is_initialized(attr) || cpuset == NULL ||
+	    cpusetsize != sizeof(cpu_set_t)) {
+		return EINVAL;
+	}
+	cpuset->bits = attr->cpu_affinity_set ? attr->cpu_affinity : 0;
+	return 0;
+}
+#endif /* CONFIG_POSIX_THREADS_AFFINITY */
 
 int pthread_setname_np(pthread_t thread, const char *name)
 {

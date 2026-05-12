@@ -44,6 +44,10 @@ struct posix_thread_attr
 	bool cancelstate: 1;
 	bool canceltype: 1;
 	bool detachstate: 1;
+#ifdef CONFIG_POSIX_THREADS_AFFINITY
+	bool cpu_affinity_set: 1;
+	uint64_t cpu_affinity;
+#endif
 };
 
 struct posix_thread {
