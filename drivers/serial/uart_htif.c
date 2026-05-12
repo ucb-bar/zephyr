@@ -151,8 +151,15 @@ static ssize_t _write(int fd, const void *ptr, size_t len)
 static void uart_htif_buffer_flush(void)
 {
 #ifdef CONFIG_UART_HTIF_SYSCALL_PRINT
-    /* Flush the buffer using the syscall-based interface */
-    _write(0, htif_output_buf, htif_output_buflen);
+    /* Flush the buffer using the syscall-based interface — same wire
+     * format as libgloss/htif_nano's _write(): one tohost roundtrip
+     * carries a pointer to a [SYS_write, fd, ptr, len] block, FESVR
+     * memcpy's the whole buffer to its host stdout, returns once.
+     * Order of magnitude faster than per-char PUTC for our trace /
+     * profile dumps (≥30 KB each on yolov8). fd=1 → stdout (was fd=0
+     * = stdin previously, which FESVR may write into the wrong place
+     * or refuse outright). */
+    _write(1, htif_output_buf, htif_output_buflen);
 #else
     for (int i = 0; i < htif_output_buflen; i++) {
         htif_wait_for_ready();
