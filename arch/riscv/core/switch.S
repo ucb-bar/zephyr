@@ -55,7 +55,16 @@ SECTION_FUNC(TEXT, z_riscv_switch)
 #endif
 
 #if defined(CONFIG_RISCV_ISA_EXT_V)
-#ifndef CONFIG_RISCV_ISA_EXT_V_LAZY
+#if defined(CONFIG_RISCV_V_DECOUPLED_LAZY)
+	/* Decoupled lazy V (Saturn fork) — defer V state work to the
+	 * V trap path.  z_riscv_v_thread_context_switch picks between
+	 * preemptive reload (for recently-used V threads) and leaving
+	 * VS=OFF so the next V instruction traps and z_riscv_v_trap
+	 * pulls the state in. */
+	mv s0, a0
+	call z_riscv_v_thread_context_switch
+	mv a0, s0
+#elif !defined(CONFIG_RISCV_ISA_EXT_V_LAZY)
 	mv s0, a0
 	mv a0, a1
 	call z_riscv_vstate_save_thread

@@ -170,8 +170,25 @@ if(CONFIG_RISCV_ISA_EXT_ZVFBFMIN)
 endif()
 
 # -----------------------------------------------------------------------------
-# Compiler and linker flags
+# RISCV_V_KERNEL_ONLY: compose a parallel "riscv_march_v" string with V kept
+# in, then strip the base 'v' from the global riscv_march. Kernel/V-aware
+# translation units (e.g. zephyr/arch/riscv/core/v.c, agents kernels.c) re-add
+# V via per-source -march=${riscv_march_v} so GCC's later -march wins.
+# Without this, GCC auto-vectorizes memset/struct-init in libc, printk, etc.,
+# even with -fno-tree-*-vectorize set. See Kconfig help for details.
 # -----------------------------------------------------------------------------
+set(riscv_march_v "${riscv_march}")
+if(CONFIG_RISCV_ISA_EXT_V AND CONFIG_RISCV_V_KERNEL_ONLY)
+  # Strip the standalone base 'v' (the one between 'c' and '_z*' or end-of-
+  # string) without touching the 'v' inside multi-letter Zv* extensions like
+  # _zvfh / _zvfbfmin. Match: a non-underscore predecessor + 'v' + (underscore
+  # or end). The Zv* names always have 'z' (not '_') before 'v', so they are
+  # safe — but they are followed by a letter (h/f/b), not '_' or EOS, so they
+  # would not match anyway.
+  string(REGEX REPLACE "([^_])v(_|$)" "\\1\\2" riscv_march "${riscv_march}")
+  message(STATUS "RISCV_V_KERNEL_ONLY=y: global -march=${riscv_march} (V stripped); per-file -march=${riscv_march_v}")
+endif()
+
 list(APPEND RISCV_C_FLAGS
      -mabi=${riscv_mabi}
      -march=${riscv_march}

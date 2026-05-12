@@ -187,6 +187,18 @@
  */
 #define MSTATUS_DEF_RESTORE (MSTATUS_MPP_M | MSTATUS_MPIE_EN)
 
+/*
+ * RVV-specific thread option (Saturn fork).  Aliased to K_FP_REGS for
+ * now — any thread that opts in to F sharing also gets V sharing,
+ * which preserves backward compatibility with thread-creation code
+ * that just sets K_FP_REGS.  When the lazy-V trap path
+ * (CONFIG_RISCV_V_DECOUPLED_LAZY) is fully wired and exercised, this
+ * may be split to its own bit so a thread can opt in to V handling
+ * without paying the F lazy cost (and vice versa).  See
+ * agents/notes/zephyr_v_decouple_design.md.
+ */
+#define K_V_REGS K_FP_REGS
+
 #ifndef _ASMLANGUAGE
 #include <zephyr/sys/util.h>
 

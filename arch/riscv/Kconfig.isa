@@ -111,6 +111,49 @@ config RISCV_ISA_EXT_V_LAZY
 	default y
 	help
 	  (V) - Standard Extension for Vector Instructions with Lazy Context Switching
+
+config RISCV_V_KERNEL_ONLY
+	bool "Restrict RVV codegen to kernel/V-context files only"
+	depends on RISCV_ISA_EXT_V
+	default n
+	help
+	  When y, the global -march passed to GCC drops the 'v' base
+	  extension, so libc, picolibc, micro-ROS, printk, and the rest
+	  of the Zephyr tree compile as scalar — GCC cannot auto-vectorize
+	  memset/memcpy/struct-init via vector stores there. The 'v'
+	  extension is added back per-file via -march=${riscv_march_v}
+	  for the V-aware translation units only:
+
+	    - zephyr/arch/riscv/core/v.c (V context save/restore)
+	    - any agents harness file that opts in via
+	      AGENTS_KERNEL_CFLAGS=-march=...v...
+
+	  Use this when (a) the toolchain target's V variant is incomplete
+	  (e.g. spike pyspike build that doesn't accept fractional LMUL)
+	  or (b) you want to minimize the V-state preemption surface on
+	  multi-hart systems where mid-V interrupts can corrupt scalar
+	  state. See agents/notes/zephyr_v_decouple_design.md.
+
+config RISCV_V_DECOUPLED_LAZY
+	bool "Enable decoupled lazy V trap path (Saturn fork)"
+	depends on RISCV_ISA_EXT_V
+	depends on !RISCV_ISA_EXT_V_LAZY
+	default n
+	help
+	  Saturn-fork-only: when set, V state save/restore is done lazily via
+	  a dedicated VS-access illegal-instruction trap (z_riscv_v_trap in
+	  arch/riscv/core/v.c) instead of eagerly on every context switch.
+	  Mirrors fpu.c's lazy F machinery but lives in v.c — the F and V
+	  paths share no state.
+
+	  When unset (default), V state is saved/restored eagerly in
+	  switch.S on every context switch.  This is the validated path on
+	  Saturn FireSim today (see agents/notes/zephyr_rvv_fix_summary.md).
+
+	  See agents/notes/zephyr_v_decouple_design.md for rationale.
+
+	  CAUTION: lazy V on Saturn has been buggy historically — only flip
+	  this on for testing under harness_microros and v_save_smoke.
 config RISCV_ISA_EXT_ZICNTR
 	bool
 	depends on RISCV_ISA_EXT_ZICSR

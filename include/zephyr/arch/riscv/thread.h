@@ -81,8 +81,18 @@ typedef struct z_riscv_v_context z_riscv_v_context_t;
 struct _thread_arch {
 #ifdef CONFIG_FPU_SHARING
 	struct z_riscv_fp_context saved_fp_context;
-	bool fpu_recently_used; // include vector extension
+	/* fpu_recently_used: thread used the F regs in the last
+	 * scheduled-out window — drives the preemptive F lazy reload in
+	 * fpu.c.  Saturn-fork note: this used to also serve V on the
+	 * coupled path; v has its own `v_recently_used` below now. */
+	bool fpu_recently_used;
 	uint8_t exception_depth;
+#endif
+#ifdef CONFIG_RISCV_V_DECOUPLED_LAZY
+	/* Parallel to fpu_recently_used but for the V extension.  Lives
+	 * outside the FPU_SHARING block so a build with V but without F
+	 * sharing still gets it. */
+	bool v_recently_used;
 #endif
 #ifdef CONFIG_USERSPACE
 	unsigned long priv_stack_start;

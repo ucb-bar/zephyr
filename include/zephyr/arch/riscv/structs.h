@@ -27,6 +27,17 @@ struct _cpu_arch {
 #endif
 #endif
 #endif
+#ifdef CONFIG_RISCV_V_DECOUPLED_LAZY
+	/* Decoupled-lazy-V per-CPU ownership tracking — parallel to
+	 * fpu_owner / fpu_state, lives independently of FPU_SHARING.
+	 * v_owner: thread whose V state is currently live in this hart's
+	 * vector registers.  NULL if none.
+	 * v_state: snapshot of MSTATUS.VS bits (VS_INIT/CLEAN/DIRTY) at
+	 * the time V was disabled, used to restore the right state on
+	 * the way back into the owner thread. */
+	atomic_ptr_val_t v_owner;
+	uint32_t v_state;
+#endif
 };
 
 #endif /* ZEPHYR_INCLUDE_RISCV_STRUCTS_H_ */

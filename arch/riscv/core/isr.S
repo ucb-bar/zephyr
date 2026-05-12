@@ -200,7 +200,11 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
 	get_current_cpu s0
 
 #ifdef CONFIG_RISCV_ISA_EXT_V
-#ifndef CONFIG_RISCV_ISA_EXT_V_LAZY
+#if defined(CONFIG_RISCV_V_DECOUPLED_LAZY)
+	/* Decoupled lazy V (Saturn fork) — V state save/restore happens
+	 * via the dedicated V trap path (z_riscv_v_trap), not on IRQ
+	 * entry/exit.  Skip the eager call here. */
+#elif !defined(CONFIG_RISCV_ISA_EXT_V_LAZY)
 	call z_riscv_vstate_save
 #endif
 #endif /* CONFIG_RISCV_ISA_EXT_V */
@@ -220,6 +224,31 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
 	sr t2, __struct_arch_esf_mstatus_OFFSET(sp)
 
 #if defined(CONFIG_FPU_SHARING)
+#if defined(CONFIG_RISCV_V_DECOUPLED_LAZY)
+	/* Decoupled lazy V trap dispatch (Saturn fork).  When VS=OFF
+	 * and the trap is illegal-instruction with opcode = OP-V (0x57),
+	 * route to z_riscv_v_trap.  Other cases fall through to the
+	 * regular F dispatch below (or to no_fp).
+	 *
+	 * Note: t2 holds mstatus on entry to this block, t0/t1 are
+	 * scratch.  We preserve t2 and trash t0/t1 only.
+	 */
+	li t1, MSTATUS_VS
+	and t1, t1, t2
+	bnez t1, _v_disp_done	/* VS != OFF, not a V-access trap */
+	csrr t0, mcause
+	li t1, CONFIG_RISCV_MCAUSE_EXCEPTION_MASK
+	and t0, t0, t1
+	li t1, 2		/* 2 = illegal instruction */
+	bne t0, t1, _v_disp_done
+	csrr t0, mtval		/* faulting instruction */
+	andi t1, t0, 0x7f	/* opcode */
+	li t0, 0x57		/* OP-V */
+	bne t1, t0, _v_disp_done
+	j is_v
+_v_disp_done:
+#endif /* CONFIG_RISCV_V_DECOUPLED_LAZY */
+
 	/* determine if FPU access was disabled */
 	li t1, MSTATUS_FS
 	and t1, t1, t2
@@ -331,6 +360,16 @@ is_fp:	/* Process the FP trap and quickly return from exception */
 	la ra, fp_trap_exit
 	mv a0, sp
 	tail z_riscv_fpu_trap
+
+#if defined(CONFIG_RISCV_V_DECOUPLED_LAZY)
+is_v:	/* Process the V-access trap and quickly return from exception.
+	 * Same exit path as is_fp — fp_trap_exit just decrements
+	 * exception_depth and proceeds to the mret-like path; nothing
+	 * F-specific in there. */
+	la ra, fp_trap_exit
+	mv a0, sp
+	tail z_riscv_v_trap
+#endif
 2:
 no_fp:	/* increment _current->arch.exception_depth */
 	lr t0, ___cpu_t_current_OFFSET(s0)
@@ -340,6 +379,11 @@ no_fp:	/* increment _current->arch.exception_depth */
 
 	/* configure the FPU for exception mode */
 	call z_riscv_fpu_enter_exc
+#if defined(CONFIG_RISCV_V_DECOUPLED_LAZY)
+	/* Same policy for V — disable VS so V code in the exception
+	 * traps cleanly into z_riscv_v_trap if it needs to use V. */
+	call z_riscv_v_enter_exc
+#endif
 #endif /* CONFIG_FPU_SHARING */
 
 #ifdef CONFIG_RISCV_SOC_CONTEXT_SAVE
@@ -766,6 +810,12 @@ no_reschedule:
 	/* FPU handling upon exception mode exit */
 	mv a0, sp
 	call z_riscv_fpu_exit_exc
+#if defined(CONFIG_RISCV_V_DECOUPLED_LAZY)
+	/* Mirror for V — re-grants VS to recently-used V threads or
+	 * leaves it OFF so the next V op traps. */
+	mv a0, sp
+	call z_riscv_v_exit_exc
+#endif
 
 	/* decrement _current->arch.exception_depth */
 	lr t0, ___cpu_t_current_OFFSET(s0)
@@ -789,7 +839,10 @@ fp_trap_exit:
 	csrw mstatus, t2
 
 #ifdef CONFIG_RISCV_ISA_EXT_V
-#ifndef CONFIG_RISCV_ISA_EXT_V_LAZY
+#if defined(CONFIG_RISCV_V_DECOUPLED_LAZY)
+	/* Decoupled lazy V — restored on demand via z_riscv_v_trap, not
+	 * eagerly on every IRQ exit. */
+#elif !defined(CONFIG_RISCV_ISA_EXT_V_LAZY)
 	call z_riscv_vstate_restore
 #endif
 #endif /* CONFIG_RISCV_ISA_EXT_V */
