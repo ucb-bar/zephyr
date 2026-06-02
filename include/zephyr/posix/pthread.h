@@ -413,6 +413,16 @@ int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
 int pthread_attr_init(pthread_attr_t *attr);
 int pthread_attr_destroy(pthread_attr_t *attr);
+#ifdef CONFIG_POSIX_THREADS_AFFINITY
+/* GNU extension: pre-create thread CPU affinity. Applied between
+ * k_thread_create(K_FOREVER) and k_thread_start() inside pthread_create().
+ * cpusetsize must be sizeof(cpu_set_t).
+ */
+int pthread_attr_setaffinity_np(pthread_attr_t *attr, size_t cpusetsize,
+				const cpu_set_t *cpuset);
+int pthread_attr_getaffinity_np(const pthread_attr_t *attr, size_t cpusetsize,
+				cpu_set_t *cpuset);
+#endif
 int pthread_attr_getschedparam(const pthread_attr_t *attr,
 			       struct sched_param *schedparam);
 int pthread_getschedparam(pthread_t pthread, int *policy,

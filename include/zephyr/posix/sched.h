@@ -52,6 +52,23 @@ int sched_setparam(pid_t pid, const struct sched_param *param);
 int sched_setscheduler(pid_t pid, int policy, const struct sched_param *param);
 int sched_rr_get_interval(pid_t pid, struct timespec *interval);
 
+/*
+ * cpu_set_t + CPU_* macros for pthread_attr_{set,get}affinity_np().
+ * Vendored as part of CONFIG_POSIX_THREADS_AFFINITY (see lib/posix/options/Kconfig.pthread).
+ * 64-bit bitmask covers up to CONFIG_MP_MAX_NUM_CPUS=64; embedded targets are well below that.
+ */
+#ifdef CONFIG_POSIX_THREADS_AFFINITY
+#define CPU_SETSIZE (sizeof(uint64_t) * 8)
+typedef struct {
+	uint64_t bits;
+} cpu_set_t;
+#define CPU_ZERO(s)     ((s)->bits = 0)
+#define CPU_SET(c, s)   ((s)->bits |= (1ULL << (c)))
+#define CPU_CLR(c, s)   ((s)->bits &= ~(1ULL << (c)))
+#define CPU_ISSET(c, s) (((s)->bits >> (c)) & 1U)
+#define CPU_COUNT(s)    __builtin_popcountll((s)->bits)
+#endif /* CONFIG_POSIX_THREADS_AFFINITY */
+
 #ifdef __cplusplus
 }
 #endif
