@@ -471,7 +471,9 @@ static DEVICE_API(sensor, vl53l1x_api_funcs) = {
 
 static int vl53l1x_init(const struct device *dev)
 {
-	int ret = 0;
+#if defined(CONFIG_VL53L1X_XSHUT) || defined(CONFIG_VL53L1X_INTERRUPT_MODE)
+	int ret;
+#endif
 	struct vl53l1x_data *drv_data = dev->data;
 	const struct vl53l1x_config *config = dev->config;
 
