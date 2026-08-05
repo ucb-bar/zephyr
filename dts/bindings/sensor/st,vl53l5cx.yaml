@@ -1,0 +1,22 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: STMicroelectronics VL53L5CX multizone Time of Flight sensor
+
+compatible: "st,vl53l5cx"
+
+include: [sensor-device.yaml, i2c-device.yaml]
+
+properties:
+  lpn-gpios:
+    type: phandle-array
+    description: |
+      Low-power pin (LPn). Driving LPn low puts the VL53L5CX into low power.
+      Driving it high wakes the device.
+
+  int-gpios:
+    type: phandle-array
+    description: |
+      Optional interrupt pin (data-ready / threshold interrupt depending on
+      configuration). Not currently used by the basic driver wrapper.
+

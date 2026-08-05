@@ -1,0 +1,78 @@
+# VL53L5CX time-of-flight sensor configuration options
+#
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig VL53L5CX
+	bool "VL53L5CX multizone time-of-flight sensor"
+	depends on DT_HAS_ST_VL53L5CX_ENABLED
+	select I2C
+	help
+	  Enable driver for ST VL53L5CX I2C multizone time-of-flight sensor.
+
+if VL53L5CX
+
+config VL53L5CX_LPN
+	bool "Use LPn pin"
+	depends on GPIO
+	help
+	  Enable to let the driver control the LPn (low-power) pin via devicetree
+	  property lpn-gpios. If disabled, LPn should be controlled externally.
+
+config VL53L5CX_I2C_CHUNK_SIZE
+	int "Max I2C burst/chunk size (bytes)"
+	default 64
+	range 16 512
+	help
+	  ST's VL53L5CX ULD performs very large transfers (e.g. firmware download).
+	  The Zephyr glue layer will split large reads/writes into chunks of this
+	  size to avoid large stack/heap allocations and controller limits.
+
+config VL53L5CX_NB_TARGET_PER_ZONE
+	int "Number of targets per zone"
+	default 1
+	range 1 4
+	help
+	  Number of targets per zone returned by the ULD. Larger values increase
+	  RAM use and I2C bandwidth.
+
+choice VL53L5CX_DEFAULT_RESOLUTION
+	prompt "Default resolution"
+	default VL53L5CX_DEFAULT_RESOLUTION_4X4
+	help
+	  Default multizone resolution programmed after init.
+
+config VL53L5CX_DEFAULT_RESOLUTION_4X4
+	bool "4x4 (16 zones)"
+
+config VL53L5CX_DEFAULT_RESOLUTION_8X8
+	bool "8x8 (64 zones)"
+
+endchoice
+
+config VL53L5CX_DEFAULT_RANGING_FREQUENCY_HZ
+	int "Default ranging frequency (Hz)"
+	default 10
+	range 1 60
+	help
+	  Default ranging frequency. Note the ULD enforces limits depending on
+	  resolution (4x4 up to 60 Hz, 8x8 up to 15 Hz).
+
+config VL53L5CX_DEFAULT_INTEGRATION_TIME_MS
+	int "Default integration time (ms)"
+	default 30
+	range 2 1000
+	help
+	  Default integration time in ms.
+
+config VL53L5CX_DATA_READY_POLL_MS
+	int "Data-ready poll interval (ms)"
+	default 5
+	range 1 100
+
+config VL53L5CX_DATA_READY_TIMEOUT_MS
+	int "Data-ready timeout (ms)"
+	default 5000
+	range 10 30000
+
+endif # VL53L5CX
+

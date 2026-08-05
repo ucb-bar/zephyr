@@ -36,6 +36,17 @@ manifest:
   # Please add items below based on alphabetical order
   # zephyr-keep-sorted-start re(^\s+\- name:)
   projects:
+    - name: hal_espressif
+      revision: 21ff951cc2ca1c3ae6a096a4f9bc3b7f2f2c5409
+      path: modules/hal/espressif
+      west-commands: west/west-commands.yml
+      groups:
+        - hal
+    - name: hal_st
+      revision: 9f81b4427e955885398805b7bca0da3a8cd9109c
+      path: modules/hal/st
+      groups:
+        - hal
     - name: acpica
       revision: 8d24867bc9c9d81c81eeac59391cda59333affd4
       path: modules/lib/acpica
