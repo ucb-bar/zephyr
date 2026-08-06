@@ -410,9 +410,14 @@ static int vl53l1x_channel_get(const struct device *dev,
 		}
 	}
 
-	val->val1 = (int32_t)(drv_data->data.RangeMilliMeter);
-	/* RangeFractionalPart not implemented in API */
-	val->val2 = 0;
+	/* Report metres on SENSOR_CHAN_DISTANCE (Zephyr sensor convention), converting from the ST
+	 * API's millimetres. Without this the raw mm leaks into consumers that assume metres (e.g. the
+	 * shared flight-controller estimator, and to stay consistent with the RoSE virtual ToF which
+	 * reports metres). val2 is the fractional part in millionths. */
+	int32_t range_mm = (int32_t)(drv_data->data.RangeMilliMeter);
+
+	val->val1 = range_mm / 1000;
+	val->val2 = (range_mm % 1000) * 1000;
 
 	return 0;
 }

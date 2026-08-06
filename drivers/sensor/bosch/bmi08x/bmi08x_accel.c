@@ -642,24 +642,35 @@ int bmi08x_accel_init(const struct device *dev)
 		return ret;
 	}
 
-	/* reboot the chip */
+	/* Reboot the chip. NOTE: on some I2C controllers (observed on the ESP32-C6) the part enters
+	 * reset mid-transaction and never ACKs the command byte, so this write reports -EIO even though
+	 * the soft reset actually takes effect (intermittent -- races the ACK against the reset). Treat
+	 * a write error as non-fatal and let the chip-ID read below confirm the device rebooted; a truly
+	 * absent/broken part is still caught there (read error or wrong ID). Mirrors bmi08x_gyro_init. */
 	ret = bmi08x_accel_byte_write(dev, BMI08X_REG_ACCEL_SOFTRESET, BMI08X_SOFT_RESET_CMD);
 	if (ret < 0) {
-		LOG_ERR("Cannot reboot chip.");
-		return ret;
+		LOG_DBG("Soft-reset write returned %d (part may not ACK during reset); "
+			"verifying via chip ID.", ret);
 	}
 
 	k_msleep(BMI08X_ACCEL_SOFTRESET_DELAY_MS);
 
-	ret = bmi08x_bus_init(dev);
-	if (ret < 0) {
-		LOG_ERR("Can't initialize bus for %s", dev->name);
-		return ret;
+	/* bus_init (the I2C mode-switch dummy read) and the chip-ID read are the accel's first
+	 * transactions after the soft reset; either can transiently NAK while the part settles, and on
+	 * a shared/warm-reset I2C bus the first transaction is the least reliable. Retry a few times
+	 * before declaring the part absent. */
+	for (int attempt = 0; attempt < 5; attempt++) {
+		ret = bmi08x_bus_init(dev);
+		if (ret == 0) {
+			ret = bmi08x_accel_byte_read(dev, BMI08X_REG_ACCEL_CHIP_ID, &val);
+		}
+		if (ret == 0) {
+			break;
+		}
+		k_msleep(2);
 	}
-
-	ret = bmi08x_accel_byte_read(dev, BMI08X_REG_ACCEL_CHIP_ID, &val);
 	if (ret < 0) {
-		LOG_ERR("Failed to read chip id.");
+		LOG_ERR("Can't initialize bus / read chip id for %s", dev->name);
 		return ret;
 	}
 

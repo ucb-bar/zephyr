@@ -351,16 +351,29 @@ int bmi08x_gyro_init(const struct device *dev)
 		return ret;
 	}
 
-	/* reboot the chip */
+	/* Reboot the chip. NOTE: on some I2C controllers (observed on the ESP32-C6) the gyro enters
+	 * reset mid-transaction and never ACKs the command byte, so this write reports -EIO even though
+	 * the soft reset actually takes effect. Treat a write error as non-fatal and let the chip-ID
+	 * read below confirm the device rebooted and is responsive; a truly absent/broken part is still
+	 * caught there (read error or wrong ID). */
 	ret = bmi08x_gyro_byte_write(dev, BMI08X_REG_GYRO_SOFTRESET, BMI08X_SOFT_RESET_CMD);
 	if (ret < 0) {
-		LOG_ERR("Cannot reboot chip.");
-		return ret;
+		LOG_DBG("Soft-reset write returned %d (part may not ACK during reset); "
+			"verifying via chip ID.", ret);
 	}
 
 	k_msleep(BMI08X_GYRO_SOFTRESET_DELAY);
 
-	ret = bmi08x_gyro_byte_read(dev, BMI08X_REG_GYRO_CHIP_ID, &val);
+	/* The chip-ID read can transiently NAK right after the soft reset (the part may still be
+	 * settling, and on a shared/warm-reset I2C bus the first transaction is the least reliable);
+	 * retry a few times before declaring the part absent. */
+	for (int attempt = 0; attempt < 5; attempt++) {
+		ret = bmi08x_gyro_byte_read(dev, BMI08X_REG_GYRO_CHIP_ID, &val);
+		if (ret == 0) {
+			break;
+		}
+		k_msleep(2);
+	}
 	if (ret < 0) {
 		LOG_ERR("Failed to read chip id.");
 		return ret;
