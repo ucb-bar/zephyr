@@ -26,6 +26,20 @@ extern "C" {
  */
 int vl53l1x_reinit(const struct device *dev);
 
+/**
+ * @brief Run the VL53L1X calibration flow (offset + crosstalk) with a placed target.
+ *
+ * Place a target at the given distances (mm) in a dark, low-reflection environment, then call.
+ * Crosstalk calibration also programs + enables crosstalk compensation. Results persist until the
+ * next power cycle (store + reload for production). See datasheet 2.3 / UM2356.
+ *
+ * @param dev       Pointer to the VL53L1X device
+ * @param offset_mm Offset calibration target distance (ST recommends ~140 mm)
+ * @param xtalk_mm  Crosstalk calibration target distance
+ * @return 0 on success, negative error code on failure
+ */
+int vl53l1x_calibrate(const struct device *dev, int32_t offset_mm, int32_t xtalk_mm);
+
 #ifdef __cplusplus
 }
 #endif
