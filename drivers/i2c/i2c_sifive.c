@@ -66,6 +66,14 @@ struct i2c_sifive_cfg {
 	uint32_t f_bus;
 };
 
+struct i2c_sifive_data {
+	/* Serializes the single I2C hardware unit across threads. Without this, concurrent
+	 * transfers from different threads (e.g. the 2 kHz IMU read in the control loop and a
+	 * VL53L1X ranging transaction in the ToF thread) interleave on the shared controller and
+	 * corrupt each other, surfacing as NACKs / VL53L1_ERROR_CONTROL_INTERFACE. */
+	struct k_mutex bus_mutex;
+};
+
 /* Helper functions */
 
 static inline bool i2c_sifive_busy(const struct device *dev)
@@ -286,6 +294,12 @@ static int i2c_sifive_transfer(const struct device *dev,
 		return -EINVAL;
 	}
 
+	struct i2c_sifive_data *data = dev->data;
+
+	/* Hold the bus for the whole multi-message transaction so a repeated-start
+	 * (write-then-read) sequence from one thread can't be split by another thread. */
+	k_mutex_lock(&data->bus_mutex, K_FOREVER);
+
 	for (int i = 0; i < num_msgs; i++) {
 		if (msgs[i].flags & I2C_MSG_READ) {
 			rc = i2c_sifive_read_msg(dev, &(msgs[i]), addr);
@@ -295,18 +309,22 @@ static int i2c_sifive_transfer(const struct device *dev,
 
 		if (rc != 0) {
 			LOG_ERR("I2C failed to transfer messages\n");
-			return rc;
+			break;
 		}
 	}
 
-	return 0;
+	k_mutex_unlock(&data->bus_mutex);
+	return rc;
 };
 
 static int i2c_sifive_init(const struct device *dev)
 {
 	const struct i2c_sifive_cfg *config = dev->config;
+	struct i2c_sifive_data *data = dev->data;
 	uint32_t dev_config = 0U;
 	int rc = 0;
+
+	k_mutex_init(&data->bus_mutex);
 
 	dev_config = (I2C_MODE_CONTROLLER | i2c_map_dt_bitrate(config->f_bus));
 
@@ -335,10 +353,11 @@ static DEVICE_API(i2c, i2c_sifive_api) = {
 		.f_sys = SIFIVE_PERIPHERAL_CLOCK_FREQUENCY, \
 		.f_bus = DT_INST_PROP(n, clock_frequency), \
 	}; \
+	static struct i2c_sifive_data i2c_sifive_data_##n; \
 	I2C_DEVICE_DT_INST_DEFINE(n, \
 			    i2c_sifive_init, \
 			    NULL, \
-			    NULL, \
+			    &i2c_sifive_data_##n, \
 			    &i2c_sifive_cfg_##n, \
 			    POST_KERNEL, \
 			    CONFIG_I2C_INIT_PRIORITY, \
