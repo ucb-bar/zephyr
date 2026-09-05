@@ -260,6 +260,17 @@ config RISCV_ISA_EXT_ZFH
 	  arithmetic, compares, classify, sign-inject, conversions, and FLH/FSH.
 	  Requires the single-precision F extension.
 
+config RISCV_SKIP_BOOT_FCSR
+	bool "Skip the boot-time fcsr initialization"
+	depends on FPU
+	help
+	  On non-spec cores that provide Zfh/Zvfh (fp16) but report misa.F=0
+	  (no scalar single/double FP, e.g. the FP16-only Saturn Rocket), the
+	  boot-time `fscsr zero` in reset.S is an illegal instruction because
+	  the fcsr CSR is gated on F. Enable this to skip that one instruction;
+	  mstatus.FS/VS are still enabled, and fp16-only vector code does not
+	  depend on the fcsr rounding-mode default.
+
 config RISCV_ISA_EXT_ZFHMIN
 	bool "Zfhmin: scalar half-precision (minimal)"
 	depends on RISCV_ISA_EXT_F

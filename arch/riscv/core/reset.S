@@ -77,7 +77,9 @@ boot_first_core:
 	 * Floating-point rounding mode set to IEEE-754 default, and clear
 	 * all exception flags.
 	 */
+#ifndef CONFIG_RISCV_SKIP_BOOT_FCSR
 	fscsr zero
+#endif
 #endif
 
 #ifdef CONFIG_INIT_STACKS
