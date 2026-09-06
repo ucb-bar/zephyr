@@ -435,7 +435,14 @@ static struct uart_sifive_data uart_sifive_data_1;
 static void uart_sifive_irq_cfg_func_1(void);
 #endif
 
+/* Guarded to match instance 0 above: without CONFIG_PINCTRL the device config
+ * struct has no pcfg member, so an unconditional pinctrl definition here makes
+ * UART_SIFIVE_PORT_1 fail to compile on every platform that does not select
+ * PINCTRL -- which is all of them except SOC_SERIES_SIFIVE_FREEDOM_FE300.
+ */
+#ifdef CONFIG_PINCTRL
 PINCTRL_DT_INST_DEFINE(1);
+#endif
 
 static const struct uart_sifive_device_config uart_sifive_dev_cfg_1 = {
 	.port         = DT_INST_REG_ADDR(1),
@@ -443,7 +450,9 @@ static const struct uart_sifive_device_config uart_sifive_dev_cfg_1 = {
 	.baud_rate    = DT_INST_PROP(1, current_speed),
 	.rxcnt_irq    = CONFIG_UART_SIFIVE_PORT_1_RXCNT_IRQ,
 	.txcnt_irq    = CONFIG_UART_SIFIVE_PORT_1_TXCNT_IRQ,
+#ifdef CONFIG_PINCTRL
 	.pcfg	      = PINCTRL_DT_INST_DEV_CONFIG_GET(1),
+#endif
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	.cfg_func     = uart_sifive_irq_cfg_func_1,
 #endif
