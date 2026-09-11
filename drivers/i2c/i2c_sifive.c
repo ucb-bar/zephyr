@@ -12,6 +12,7 @@ LOG_MODULE_REGISTER(i2c_sifive);
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/kernel.h>
 #include <soc.h>
 #include <zephyr/sys/sys_io.h>
 
@@ -64,6 +65,28 @@ struct i2c_sifive_cfg {
 	uint32_t base;
 	uint32_t f_sys;
 	uint32_t f_bus;
+};
+
+/*
+ * Per-instance bus lock.
+ *
+ * Zephyr's I2C API is specified as thread-safe: drivers are expected to
+ * serialise i2c_transfer() themselves, and callers of the sensor API have no
+ * way to do it for them because the transfers happen inside driver code they
+ * never see. This driver had no data struct at all and took no lock, so two
+ * threads on one controller interleaved at register level -- the peripheral has
+ * a single set of DATA/CMD registers and one TIP flag, so an interleaved pair
+ * of transfers corrupts both.
+ *
+ * Measured on riskybird (Arty200T, SiFive I2C at 0x10040000) with a BMI088 on
+ * the control loop and a VL53L1X on its own thread: 399 of ~4830 IMU reads
+ * failed, and the corrupted gyro values kept tripping the flight controller's
+ * stillness test so its gyro-bias calibration never completed. Before those
+ * threads were both runnable the bus had only one user and the defect was
+ * invisible.
+ */
+struct i2c_sifive_data {
+	struct k_mutex lock;
 };
 
 /* Helper functions */
@@ -286,6 +309,13 @@ static int i2c_sifive_transfer(const struct device *dev,
 		return -EINVAL;
 	}
 
+	/* Hold the bus for the whole message set, not per message: a transfer is
+	 * an addressed START..STOP sequence and splitting one apart is the same
+	 * corruption this lock exists to prevent. */
+	struct i2c_sifive_data *data = dev->data;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+
 	for (int i = 0; i < num_msgs; i++) {
 		if (msgs[i].flags & I2C_MSG_READ) {
 			rc = i2c_sifive_read_msg(dev, &(msgs[i]), addr);
@@ -295,9 +325,12 @@ static int i2c_sifive_transfer(const struct device *dev,
 
 		if (rc != 0) {
 			LOG_ERR("I2C failed to transfer messages\n");
+			k_mutex_unlock(&data->lock);
 			return rc;
 		}
 	}
+
+	k_mutex_unlock(&data->lock);
 
 	return 0;
 };
@@ -305,8 +338,13 @@ static int i2c_sifive_transfer(const struct device *dev,
 static int i2c_sifive_init(const struct device *dev)
 {
 	const struct i2c_sifive_cfg *config = dev->config;
+	struct i2c_sifive_data *data = dev->data;
 	uint32_t dev_config = 0U;
 	int rc = 0;
+
+	/* Before the first configure: init runs at POST_KERNEL on one thread, but
+	 * the lock must be valid before any other thread can reach transfer(). */
+	k_mutex_init(&data->lock);
 
 	dev_config = (I2C_MODE_CONTROLLER | i2c_map_dt_bitrate(config->f_bus));
 
@@ -335,10 +373,11 @@ static DEVICE_API(i2c, i2c_sifive_api) = {
 		.f_sys = SIFIVE_PERIPHERAL_CLOCK_FREQUENCY, \
 		.f_bus = DT_INST_PROP(n, clock_frequency), \
 	}; \
+	static struct i2c_sifive_data i2c_sifive_data_##n; \
 	I2C_DEVICE_DT_INST_DEFINE(n, \
 			    i2c_sifive_init, \
 			    NULL, \
-			    NULL, \
+			    &i2c_sifive_data_##n, \
 			    &i2c_sifive_cfg_##n, \
 			    POST_KERNEL, \
 			    CONFIG_I2C_INIT_PRIORITY, \
