@@ -193,6 +193,28 @@ static int vl53l1x_initialize(const struct device *dev)
 		return -EINVAL;
 	}
 
+	/* Timing budget: 33 ms is the minimum for all distance modes; a longer budget integrates more
+	 * signal (better range/repeatability on weak/dark targets, at a lower ranging rate). Overridable
+	 * at build time (-DVL53L1X_TIMING_BUDGET_US=...). Cheap to raise here since the ToF runs on its
+	 * own thread on riskybird. */
+#ifndef VL53L1X_TIMING_BUDGET_US
+#define VL53L1X_TIMING_BUDGET_US 33000
+#endif
+	ret = VL53L1_SetMeasurementTimingBudgetMicroSeconds(&drv_data->vl53l1x, VL53L1X_TIMING_BUDGET_US);
+	if (ret != VL53L1_ERROR_NONE) {
+		LOG_ERR("[%s] VL53L1_SetMeasurementTimingBudget error (%d)", dev->name, ret);
+		return -EINVAL;
+	}
+
+	/* Enable crosstalk compensation so the factory-calibrated internal crosstalk (and any host-loaded
+	 * cover-glass xtalk) is subtracted from the histogram. The stock driver never enabled it, so the
+	 * ~0 mm crosstalk peak could dominate a real target -> reports ~0 mm at very high signal rate. */
+	ret = VL53L1_SetXTalkCompensationEnable(&drv_data->vl53l1x, 1);
+	if (ret != VL53L1_ERROR_NONE) {
+		LOG_ERR("[%s] VL53L1_SetXTalkCompensationEnable error (%d)", dev->name, ret);
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
@@ -527,6 +549,46 @@ int vl53l1x_reinit(const struct device *dev)
 	}
 
 	return vl53l1x_initialize(dev);
+}
+
+/* Run the ST calibration flow once (see datasheet 2.3 / UM2356). Place a target at the given
+ * distances (in mm) in a dark, low-reflection environment before calling:
+ *   offset_mm : offset calibration distance (ST recommends ~140 mm, grey ~17-54% target)
+ *   xtalk_mm  : crosstalk calibration distance (a target where signal is moderate)
+ * PerformSingleTargetXTalkCalibration also enables + programs crosstalk compensation. The results
+ * live in the device until the next power cycle; for production they'd be stored + reloaded. */
+int vl53l1x_calibrate(const struct device *dev, int32_t offset_mm, int32_t xtalk_mm)
+{
+	struct vl53l1x_data *drv_data;
+	VL53L1_Error ret;
+
+	if (dev == NULL) {
+		return -EINVAL;
+	}
+	drv_data = dev->data;
+	if (!drv_data->initialized) {
+		int rc = vl53l1x_initialize(dev);
+		if (rc) {
+			return rc;
+		}
+	}
+
+	ret = VL53L1_PerformOffsetSimpleCalibration(&drv_data->vl53l1x, offset_mm);
+	if (ret != VL53L1_ERROR_NONE) {
+		LOG_ERR("[%s] VL53L1_PerformOffsetSimpleCalibration error (%d)", dev->name, ret);
+		return -EIO;
+	}
+	ret = VL53L1_PerformSingleTargetXTalkCalibration(&drv_data->vl53l1x, xtalk_mm);
+	if (ret != VL53L1_ERROR_NONE) {
+		LOG_ERR("[%s] VL53L1_PerformSingleTargetXTalkCalibration error (%d)", dev->name, ret);
+		return -EIO;
+	}
+	ret = VL53L1_SetXTalkCompensationEnable(&drv_data->vl53l1x, 1);
+	if (ret != VL53L1_ERROR_NONE) {
+		LOG_ERR("[%s] VL53L1_SetXTalkCompensationEnable error (%d)", dev->name, ret);
+		return -EIO;
+	}
+	return 0;
 }
 
 #define VL53L1X_INIT(i) \
