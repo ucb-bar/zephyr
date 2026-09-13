@@ -50,6 +50,74 @@ static inline unsigned long read_csr_misa(void)
 #define HAS_V() (IS_ENABLED(CONFIG_RISCV_ISA_EXT_V) && \
 		 (read_csr_misa() & MISA_EXT_BIT('V')))
 
+/* ---------------------------------------------------------------------------
+ * V-preemption-race mitigations (Saturn fork).  These were part of the
+ * deployed baseline (verified byte-for-byte against zephyr_ub_base.elf disasm:
+ * force_vstart0 8x-retry @0x800072b0/0x800073a0, strong_drain canary
+ * @0x800072c6/0x800073b6, MB_V_SAVE_FENCE @0x8000724c/0x8000739a, thread_in_ram
+ * guard @0x8000722e/0x8000732e, dbg globals @0x80082c50..80). They are re-stated
+ * here alongside the t0/t1 register-realloc restore fix (see the reload loop in
+ * z_riscv_vstate_restore_thread). The realloc is the load-bearing fix for the
+ * a4/a5 RoCC-scalar-response strand; these mitigations cover the vstart-partial
+ * / stale-vtype confound and provide diagnostics.
+ * ------------------------------------------------------------------------- */
+
+/* dbg globals + drain canary (file scope; addresses tracked in the deployed
+ * ELF at 80082c50..80082c80). */
+volatile unsigned long z_riscv_v_dbg_wild_save,    z_riscv_v_dbg_wild_save_ptr;
+volatile unsigned long z_riscv_v_dbg_wild_restore, z_riscv_v_dbg_wild_restore_ptr;
+volatile unsigned long z_riscv_v_dbg_restore_entry_vstart; /* vstart at restore entry */
+volatile unsigned long z_riscv_v_dbg_restore_nonzero;      /* count restores w/ vstart!=0 */
+static volatile unsigned long z_riscv_v_drain_canary;
+
+/* Wild-pointer guard: a valid k_thread lives in SRAM and is 8-aligned. Guards
+ * the eager save/restore against a corrupted thread pointer (a0) so a wild
+ * vse8.v/vle8.v does not fault on an out-of-range address. NOTE: this does NOT
+ * catch the observed a0=0x44 mechanism reaching the same vle8.v via a stale
+ * mstatus_v/is_dirty path — it only rejects pointers outside SRAM. */
+static inline bool z_riscv_v_thread_in_ram(const struct k_thread *t)
+{
+	uintptr_t p = (uintptr_t)t;
+	return (p >= (uintptr_t)CONFIG_SRAM_BASE_ADDRESS) &&
+	       (p <  (uintptr_t)CONFIG_SRAM_BASE_ADDRESS +
+			     ((uintptr_t)CONFIG_SRAM_SIZE << 10)) &&
+	       ((p & 7UL) == 0UL);
+}
+
+/* Force vstart==0 with a bounded (8x) drain+clear+verify retry. vsetvli does
+ * NOT clear vstart per the RVV spec; a leftover non-zero vstart from a preempted
+ * V op makes the following vsetvli/vse8.v/vle8.v start mid-register (partial
+ * op / stale vtype). Retrying with a fence between attempts covers a decoupled
+ * write to vstart that has not yet retired. */
+static inline void z_riscv_force_vstart0(void)
+{
+	unsigned long vs;
+	int n = 0;
+
+	do {
+		__asm volatile("fence rw, rw" ::: "memory");
+		__asm volatile(".option push\n\t"
+			       ".option arch, +v\n\t"
+			       "csrw	vstart, x0\n\t"
+			       "csrr	%0, vstart\n\t"
+			       ".option pop\n\t"
+			       : "=r"(vs));
+	} while (vs != 0 && ++n < 8);
+}
+
+/* Stronger drain: fence, a dependent load-after-store to a canary, then consume
+ * the loaded value under a second fence. Forces the store buffer / any in-flight
+ * decoupled traffic to a defined ordering point before the bulk V load/store. */
+static inline void z_riscv_v_strong_drain(void)
+{
+	unsigned long v;
+
+	__asm volatile("fence rw, rw" ::: "memory");
+	z_riscv_v_drain_canary = 1UL;            /* store */
+	v = z_riscv_v_drain_canary;              /* dependent load-after-store */
+	__asm volatile("fence rw, rw" :: "r"(v) : "memory"); /* consume -> ordering */
+}
+
 /* Snapshot the four V CSRs into the per-thread save area.  Caller must
  * have ensured MSTATUS.VS != OFF — otherwise these csrr ops trap with
  * illegal-instruction.  Used by both the eager and lazy save paths. */
@@ -125,6 +193,14 @@ void z_riscv_vstate_save_thread(struct k_thread *thread)
 		return;
 	}
 
+	/* Wild-pointer guard: reject a corrupted thread pointer before it
+	 * reaches the eager vse8.v (matches deployed baseline @0x8000722e). */
+	if (!z_riscv_v_thread_in_ram(thread)) {
+		z_riscv_v_dbg_wild_save++;
+		z_riscv_v_dbg_wild_save_ptr = (unsigned long)thread;
+		return;
+	}
+
 	struct z_riscv_v_context *save_to = &thread->arch.saved_v_context;
 	unsigned long mstatus_v = csr_read(mstatus) & MSTATUS_VS;
 
@@ -135,6 +211,8 @@ void z_riscv_vstate_save_thread(struct k_thread *thread)
 		 * MSTATUS.VS=DIRTY for every V op, so a DIRTY-only fast
 		 * path could miss real reg modifications. */
 		z_riscv_vstate_csr_save(save_to);
+		z_riscv_force_vstart0();
+		z_riscv_v_strong_drain();
 		unsigned long vl;
 		__asm volatile(
 			".option push\n\t"
@@ -153,6 +231,10 @@ void z_riscv_vstate_save_thread(struct k_thread *thread)
 			: "r"(save_to->vreg)
 			: "memory");
 	}
+
+	/* MB_V_SAVE_FENCE (save side): order the bulk vse8.v ahead of the
+	 * is_dirty publish + mstatus flip (matches deployed @0x8000724c). */
+	__asm volatile("fence rw, rw" ::: "memory");
 	save_to->is_dirty = (mstatus_v != 0);
 
 	csr_clear(mstatus, MSTATUS_VS);
@@ -172,12 +254,43 @@ void z_riscv_vstate_restore_thread(struct k_thread *thread)
 	if (!HAS_V()) {
 		return;
 	}
+
+	/* Wild-pointer guard: reject a corrupted thread pointer before it
+	 * reaches the eager vle8.v (matches deployed baseline @0x8000732e).
+	 * DIAGNOSTIC ROLE for the a0 residual: if a0 is wild AT ENTRY
+	 * (memory-mediated thread-ptr corruption), this catches it here and
+	 * increments z_riscv_v_dbg_wild_restore instead of faulting later at
+	 * `ld a5,512(a0)`. If a0 is instead clobbered mid-function (decoupled
+	 * resp with rd=a0), the guard passes and the later fault persists. */
+	if (!z_riscv_v_thread_in_ram(thread)) {
+		z_riscv_v_dbg_wild_restore++;
+		z_riscv_v_dbg_wild_restore_ptr = (unsigned long)thread;
+		return;
+	}
+
 	struct z_riscv_v_context *restore_from = &thread->arch.saved_v_context;
 
 	/* Enable V access — csr_set only ORs bits, lifting VS from
 	 * OFF/INIT/CLEAN to at least CLEAN so the V loads + CSR writes
 	 * below don't raise illegal-instruction. */
 	csr_set(mstatus, MSTATUS_VS_CLEAN);
+
+	/* Diagnostic: record vstart seen on entry (matches deployed
+	 * @0x8000734a); a non-zero value means a preempted V op leaked its
+	 * partial-completion vstart across the switch. */
+	{
+		unsigned long ev;
+
+		__asm volatile(".option push\n\t"
+			       ".option arch, +v\n\t"
+			       "csrr %0, vstart\n\t"
+			       ".option pop\n\t"
+			       : "=r"(ev));
+		z_riscv_v_dbg_restore_entry_vstart = ev;
+		if (ev != 0) {
+			z_riscv_v_dbg_restore_nonzero++;
+		}
+	}
 
 	/* Always reset vstart=0 — vsetvli does NOT clear vstart per the
 	 * RVV spec, so a leftover non-zero vstart from a preempted V op
@@ -198,7 +311,21 @@ void z_riscv_vstate_restore_thread(struct k_thread *thread)
 	 * V-using thread will properly restore once it has had a chance
 	 * to save its state. */
 	if (restore_from->is_dirty) {
-		unsigned long vl;
+		/* MB_V_SAVE_FENCE (restore side) + vstart force + strong drain
+		 * ahead of the bulk vle8.v (matches deployed @0x8000739a). */
+		__asm volatile("fence rw, rw" ::: "memory");
+		z_riscv_force_vstart0();
+		z_riscv_v_strong_drain();
+
+		/* V-RACE FIX (local test, saturn-rocc-sresp-reg-realloc): force the bulk vle8.v to use
+		 * t-registers (t0=ptr, t1=VLMAX) instead of the compiler's default a4/a5. A co-resident RoCC
+		 * accelerator scalar response (FC custom-0 fc_rocc POP rd=a4/a5, or Gemmini counter rd=a5),
+		 * backpressured behind the switch's vector traffic, lands DURING this vle8.v; if the base/VLMAX
+		 * are a4/a5 the add a5,a5,a4 consumes the strayed resp -> wild vle8.v (mcause 5/2). Using t0/t1
+		 * (no accel/div op targets rd=5/6) makes a strayed a4/a5 resp land on DEAD a4/a5 harmlessly --
+		 * TIMING-INDEPENDENT (no drain needed; SW drains fail due to wb_wxd backpressure). */
+		register unsigned long _vr_ptr asm("t0") = (unsigned long)restore_from->vreg;
+		register unsigned long _vr_vl  asm("t1");
 		__asm volatile(
 			".option push\n\t"
 			".option arch, +v\n\t"
@@ -211,8 +338,8 @@ void z_riscv_vstate_restore_thread(struct k_thread *thread)
 			"add		%1, %1, %0\n\t"
 			"vle8.v		v24, (%1)\n\t"
 			".option pop\n\t"
-			: "=&r"(vl)
-			: "r"(restore_from->vreg)
+			: "=&r"(_vr_vl)
+			: "r"(_vr_ptr)
 			: "memory");
 		z_riscv_vstate_csr_restore(restore_from);
 	}
