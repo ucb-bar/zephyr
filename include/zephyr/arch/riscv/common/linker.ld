@@ -116,8 +116,14 @@ MEMORY
 
     LINKER_DT_REGIONS()
 
-    /* Used by and documented in include/linker/intlist.ld */
-    IDT_LIST  (wx)      : ORIGIN = 0xFFFFF000, LENGTH = 4K
+    /* Used by and documented in include/linker/intlist.ld. This is a BOGUS, build-only
+     * region (.intList is consumed by gen_isr_tables and dropped from the final image),
+     * so its origin just needs to not overlap real sections during the pre0 link. The
+     * stock 0xFFFFF000 (4GB-4K) sits inside the external whole-model WEIGHTS span
+     * [0xC0000000, +multi-GB blob] (merlin oscar runner), causing a spurious
+     * ".intList LMA overlaps .merlin_weights" error. Park it at 256GB, far above any
+     * weights blob — harmless for normal (<4GB) images. */
+    IDT_LIST  (wx)      : ORIGIN = 0x4000000000, LENGTH = 4K
 }
 
 ENTRY(CONFIG_KERNEL_ENTRY)
