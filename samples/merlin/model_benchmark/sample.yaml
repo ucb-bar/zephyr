@@ -1,0 +1,30 @@
+sample:
+  name: Merlin / IREE model benchmark
+  description: >
+    Embeds an IREE .vmfb compiled by `merlin compile --target zephyr_rocket_rv64`
+    and invokes module.main on chipyard_riscv64 with app-level multi-hart
+    parallelism (one k_thread per worker, each driving its own
+    iree_vm_context). IREE itself is built unmodified under
+    IREE_PLATFORM_GENERIC. Validates the Merlin × Zephyr × FireSim
+    integration end-to-end.
+common:
+  tags:
+    - merlin
+    - iree
+    - riscv
+    - smp
+  filter: CONFIG_RISCV and CONFIG_FPU
+  harness: console
+  harness_config:
+    type: one_line
+    regex:
+      - "CSV-AGG, .*, .*, workers=[0-9]+, avg=[0-9]+"
+tests:
+  sample.merlin.model_benchmark.smp4:
+    platform_allow:
+      - chipyard_riscv64
+    extra_args: CONFIG_MP_MAX_NUM_CPUS=4 CONFIG_MERLIN_IREE_NUM_WORKERS=4
+  sample.merlin.model_benchmark.single:
+    platform_allow:
+      - chipyard_riscv64
+    extra_args: CONFIG_MP_MAX_NUM_CPUS=1 CONFIG_MERLIN_IREE_NUM_WORKERS=1
